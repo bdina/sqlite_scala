@@ -9,6 +9,7 @@
 plugins {
     // Apply the scala plugin to add support for Scala
     id 'scala'
+    id 'application'
 }
 
 repositories {
@@ -19,7 +20,7 @@ repositories {
 
 dependencies {
     // Use Scala 2.12 in our library project
-    implementation 'org.scala-lang:scala-library:2.12.8'
+    compile 'org.scala-lang:scala-library:2.12.8'
 
     // Use Scalatest for testing our library
     testImplementation 'junit:junit:4.12'
@@ -27,4 +28,35 @@ dependencies {
 
     // Need scala-xml at test runtime
     testRuntimeOnly 'org.scala-lang.modules:scala-xml_2.12:1.1.1'
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+version = '1.0'
+
+application {
+    mainClassName = 'sqlite.SQLite'
+}
+
+task repl(type:JavaExec) {
+    main = "scala.tools.nsc.MainGenericRunner"
+    classpath = sourceSets.main.runtimeClasspath
+    standardInput System.in
+    args '-usejavacp'
+}
+
+task uberJar(type: Jar) {
+    with jar
+
+    manifest {
+        attributes 'Main-Class': project.mainClassName
+    }
+    from {
+        configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+}
+
+compileScala { // or: tasks.withType(ScalaCompile)
+    scalaCompileOptions.additionalParameters = ["-feature"]
+    scalaCompileOptions.additionalParameters = ["-deprecation"]
 }
