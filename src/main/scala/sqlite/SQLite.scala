@@ -17,12 +17,11 @@ case class Table ( ) {
 
   def row_slot ( row_num : Int ) : ( Page , Int ) = {
     val page_num = row_num / Table.ROWS_PER_PAGE
-    var page = this.pages(page_num)
-    if ( page == null ) {
-      // Allocate memory only when we try to access page
+    if ( page_num > this.pages.size ) {
+      // Allocate memory only when we try to access new page
       this.pages(page_num) = new Page ()
-      page = this.pages(page_num)
     }
+    val page = this.pages(page_num)
     val row_offset  = row_num % Table.ROWS_PER_PAGE
     val byte_offset = row_offset * UserRow.Column.ROW_BYTES
     ( page , byte_offset )
@@ -49,24 +48,21 @@ case object UserRow {
   }
 
   def serialize ( row : UserRow ) : Array[Byte] = {
-    val id_arr    = Array( row.id.byteValue )
+    import java.nio.ByteBuffer
+    val id_arr    = ByteBuffer.allocate(4).putInt(row.id).array
 
-    val user_arr  = row.user.getBytes
-    val email_arr = row.email.getBytes
+    val user_arr  = ByteBuffer.allocate(UserRow.Column.USER_BYTES).put(row.user.getBytes).array
+    val email_arr = ByteBuffer.allocate(UserRow.Column.EMAIL_BYTES).put(row.email.getBytes).array
 
-    val padded_id    = id_arr    ++ Array.fill[Byte]( UserRow.Column.ID_BYTES    - id_arr.length   ) { 0 }
-    val padded_user  = user_arr  ++ Array.fill[Byte]( UserRow.Column.USER_BYTES  - user_arr.length ) { 0 }
-    val padded_email = email_arr ++ Array.fill[Byte]( UserRow.Column.EMAIL_BYTES - user_arr.length ) { 0 }
-
-    padded_id ++ padded_user ++ padded_email
+    id_arr ++ user_arr ++ email_arr
   }
 
   def deserialze ( row : Array[Byte] ) : UserRow = {
     import java.nio.ByteBuffer
-    val id    = row.slice( UserRow.Column.ID_OFFSET    , UserRow.Column.ID_BYTES    )
-    val user  = row.slice( UserRow.Column.USER_OFFSET  , UserRow.Column.USER_BYTES  )
-    val email = row.slice( UserRow.Column.EMAIL_OFFSET , UserRow.Column.EMAIL_BYTES )
-    UserRow( ByteBuffer.wrap(id).getInt , new String(user) , new String(email) )
+    val id    = row.slice( UserRow.Column.ID_OFFSET    , UserRow.Column.USER_OFFSET  )
+    val user  = row.slice( UserRow.Column.USER_OFFSET  , UserRow.Column.EMAIL_OFFSET )
+    val email = row.slice( UserRow.Column.EMAIL_OFFSET , row.length )
+    UserRow( ByteBuffer.wrap(id).getInt , new String(user).trim , new String(email).trim )
   }
 }
 
@@ -112,19 +108,19 @@ object SQLite {
     }
   }
 
-  val INSERT_MATCHER : scala.util.matching.Regex = "insert(.*)into(.*)".r
-  val SELECT_MATCHER : scala.util.matching.Regex = "select(.*)from(.*)".r
+  val INSERT_MATCHER : scala.util.matching.Regex = "insert (.*) (.*) (.*)".r
+  val SELECT_MATCHER : scala.util.matching.Regex = "select (.*)".r
 
   def prepare_statement ( statement : String ) : ( PrepareStatement.Result , Option[Statement] ) = {
     if ( statement.startsWith("insert") ) {
       val row = INSERT_MATCHER.findFirstMatchIn(statement) match {
-        case Some(v) => UserRow(0,v.group(1),v.group(2))
+        case Some(v) => UserRow(Integer.parseInt(v.group(1)),v.group(2),v.group(3))
         case _ => return ( PrepareStatement.UNRECOGNIZED_STATEMENT , None )
       }
       ( PrepareStatement.SUCCESS , Some(Statement(StatementType.INSERT, row)) )
     } else if ( statement.startsWith("select") ) {
       val row = SELECT_MATCHER.findFirstMatchIn(statement) match {
-        case Some(v) => UserRow(0,v.group(1),v.group(2))
+        case Some(_) => UserRow()
         case _ => return ( PrepareStatement.UNRECOGNIZED_STATEMENT , None )
       }
       ( PrepareStatement.SUCCESS , Some(Statement(StatementType.SELECT , row)) )
@@ -140,7 +136,8 @@ object SQLite {
 
     val row_to_insert = statement.row
     val ( page , slot ) = table.row_slot(table.row_num)
-    page.data.insertAll(slot,UserRow.serialize(row_to_insert))
+    val bytes = UserRow.serialize(row_to_insert)
+    page.data.insertAll(slot,bytes)
     table.row_num += 1
 
     ExecuteStatement.SUCCESS
@@ -149,7 +146,8 @@ object SQLite {
   def execute_select ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
     for ( i <- 0 until table.row_num ) {
       val ( page , slot ) = table.row_slot(i)
-      val row = UserRow.deserialze(page.data.slice(slot,UserRow.Column.ROW_BYTES).toArray)
+      val eob = slot + UserRow.Column.ROW_BYTES
+      val row = UserRow.deserialze(page.data.slice(slot,eob).toArray)
       println(row)
     }
     ExecuteStatement.SUCCESS
