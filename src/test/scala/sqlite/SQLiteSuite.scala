@@ -71,15 +71,22 @@ class SQLiteSuite extends FlatSpec with Matchers {
   it should "print error message if strings are too long" in {
     val user  = "a"*41
     val email = "a"*41
-    val commands = util.List.of(s"insert 1 $user $email" , "select *")
+    val commands = util.Arrays.asList(s"insert 1 $user $email")
     val result = run_script(commands).iterator()
     result.next should be ( "db > String is too long." )
-    result.next should be ( "db > Executed." )
   }
 
   it should "print error message is id is negative" in {
-    val result = run_script(java.util.List.of("insert -1 user1 person1@example.com" , "select *")).iterator()
+    val result = run_script(java.util.Arrays.asList("insert -1 user1 person1@example.com")).iterator()
     result.next should be ( "db > ID must be positive." )
-    result.next should be ( "db > Executed." )
+  }
+
+  it should "keep data after closing connection" in {
+    val result1 = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
+    result1.next should be ( "db > Executed." )
+    result1.next should be ( "db > (1, user1, person1@example.com)" )
+
+    val result2 = run_script(util.Arrays.asList("select *")).iterator()
+    result2.next should be ( "db > (1, user1, person1@example.com)" )
   }
 }
