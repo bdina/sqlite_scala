@@ -17,14 +17,14 @@ case class Table ( ) {
 
   def row_slot ( row_num : Int ) : ( Page , Int ) = {
     val page_num = row_num / Table.ROWS_PER_PAGE
-    if ( page_num > this.pages.size ) {
+    if ( page_num >= this.pages.size ) {
       // Allocate memory only when we try to access new page
-      this.pages(page_num) = new Page ()
+      this.pages += new Page ()
     }
     val page = this.pages(page_num)
-    val row_offset  = row_num % Table.ROWS_PER_PAGE
+    val row_offset = row_num % Table.ROWS_PER_PAGE
     val byte_offset = row_offset * UserRow.Column.ROW_BYTES
-    ( page , byte_offset )
+    (page, byte_offset)
   }
 }
 
@@ -51,8 +51,8 @@ case object UserRow {
     import java.nio.ByteBuffer
     val id_arr    = ByteBuffer.allocate(4).putInt(row.id).array
 
-    val user_arr  = ByteBuffer.allocate(UserRow.Column.USER_BYTES).put(row.user.getBytes).array
-    val email_arr = ByteBuffer.allocate(UserRow.Column.EMAIL_BYTES).put(row.email.getBytes).array
+    val user_arr  = ByteBuffer.allocate( UserRow.Column.USER_BYTES  ).put( row.user.getBytes  ).array
+    val email_arr = ByteBuffer.allocate( UserRow.Column.EMAIL_BYTES ).put( row.email.getBytes ).array
 
     id_arr ++ user_arr ++ email_arr
   }
@@ -67,7 +67,7 @@ case object UserRow {
 }
 
 sealed trait Row
-case class UserRow ( id : Int = 0
+case class UserRow ( id    : Int    = 0
                    , user  : String = ""
                    , email : String = "" ) extends Row {
 
@@ -82,6 +82,8 @@ case class Statement ( statement_type : StatementType , row : UserRow )
 object PrepareStatement {
   sealed trait Result
   case object SUCCESS                extends Result
+  case object NEGATIVE_ID            extends Result
+  case object STRING_TOO_LONG        extends Result
   case object SYNTAX_ERROR           extends Result
   case object UNRECOGNIZED_STATEMENT extends Result
 }
@@ -114,7 +116,18 @@ object SQLite {
   def prepare_statement ( statement : String ) : ( PrepareStatement.Result , Option[Statement] ) = {
     if ( statement.startsWith("insert") ) {
       val row = INSERT_MATCHER.findFirstMatchIn(statement) match {
-        case Some(v) => UserRow(Integer.parseInt(v.group(1)),v.group(2),v.group(3))
+        case Some(v) =>
+          val id    = Integer.parseInt(v.group(1))
+          val user  = v.group(2)
+          val email = v.group(3)
+
+          if ( id < 0 ) { return ( PrepareStatement.NEGATIVE_ID , None ) }
+
+          if ( ( user.length  > UserRow.Column.USER_BYTES ) || ( email.length > UserRow.Column.EMAIL_BYTES ) ) {
+            return ( PrepareStatement.STRING_TOO_LONG , None )
+          }
+
+          UserRow(id,user,email)
         case _ => return ( PrepareStatement.UNRECOGNIZED_STATEMENT , None )
       }
       ( PrepareStatement.SUCCESS , Some(Statement(StatementType.INSERT, row)) )
@@ -181,25 +194,31 @@ object SQLite {
     while ( true ) {
       print_prompt()
 
-      val scanner = read_input()
+      try {
+        val scanner = read_input()
 
-      val token = scanner.next
+        val token = scanner.next
 
-      if ( token.startsWith(".") ) {
-        do_meta_command ( token )
-      }
+        if (token.startsWith(".")) {
+          do_meta_command(token)
+        }
 
-      val line = token + scanner.nextLine
+        val line = token + scanner.nextLine
 
-      prepare_statement ( line ) match {
-        case ( PrepareStatement.SUCCESS , Some(statement) ) =>
-          execute_statement ( statement , table ) match {
-            case ExecuteStatement.SUCCESS    => println("executed.")
-            case ExecuteStatement.TABLE_FULL => println("table full!")
-          }
-        case ( PrepareStatement.SYNTAX_ERROR , None ) => println(s"Unrecognized keyword at start of '$line'.")
-        case ( PrepareStatement.UNRECOGNIZED_STATEMENT , None ) => println(s"Unrecognized statement '$line'.")
-        case  _ => println(s"Unknown error for '$line'.")
+        prepare_statement(line) match {
+          case ( PrepareStatement.SUCCESS , Some(statement) ) =>
+            execute_statement(statement, table) match {
+              case ExecuteStatement.SUCCESS    => println( "Executed."   )
+              case ExecuteStatement.TABLE_FULL => println( "Table full!" )
+            }
+          case ( PrepareStatement.NEGATIVE_ID            , None ) => println(s"ID must be positive.")
+          case ( PrepareStatement.STRING_TOO_LONG        , None ) => println(s"String is too long.")
+          case ( PrepareStatement.SYNTAX_ERROR           , None ) => println(s"Unrecognized keyword at start of '$line'.")
+          case ( PrepareStatement.UNRECOGNIZED_STATEMENT , None ) => println(s"Unrecognized statement '$line'.")
+          case _ => println(s"Error: '$line'.")
+        }
+      } catch {
+        case e : Exception => println(s"Error: '${e.getMessage}'.")
       }
     }
   }

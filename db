@@ -1,0 +1,3 @@
+#!/bin/bash
+
+/Users/bdina/.jenv/shims/java -jar /Users/bdina/hg/sqlite_scala/build/libs/sqlite_scala-1.0.jar
