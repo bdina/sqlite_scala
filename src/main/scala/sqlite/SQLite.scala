@@ -1,30 +1,106 @@
 package sqlite
 
+import java.io.{File, RandomAccessFile}
+import java.nio.file.Paths
+
 import scala.collection.mutable.ArrayBuffer
 
-class Page ( val data : ArrayBuffer[Byte] = new ArrayBuffer[Byte](Table.PAGE_BYTES) )
+case class Page ( data : ArrayBuffer[Byte] = new ArrayBuffer[Byte](Pager.PAGE_BYTES) )
+
+case class Pager ( file : File ) {
+  val file_descriptor : RandomAccessFile = new RandomAccessFile(file, "rw")
+
+  var file_length : Long = file.length()
+  var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page](Page ())
+
+  def get_page ( page_num : Int ) : Page = {
+    if ( page_num >= this.pages.size ) {
+      // Allocate memory only when we try to access new page
+      this.pages += Page ()
+    }
+
+    var num_pages = file_length / Pager.PAGE_BYTES
+
+    // We might save a partial page at the end of the file
+    if ( file_length % Pager.PAGE_BYTES > 0 ) { num_pages += 1 }
+
+    if ( page_num <= num_pages ) {
+      file_descriptor.seek(page_num * Pager.PAGE_BYTES)
+      val page_data = new Array[Byte](Pager.PAGE_BYTES)
+      val bytes_read = file_descriptor.read(page_data)
+      if ( bytes_read == -1 ) {
+        println(s"Error reading file: '$file_descriptor'")
+        System.exit(-1)
+      }
+      this.pages(page_num) = Page ( collection.mutable.ArrayBuffer(page_data: _*) )
+    }
+
+    this.pages(page_num)
+  }
+
+  def pager_flush ( page_num : Int , size : Int ) : Unit = {
+    if ( this.pages(page_num) == null ) {
+      println("Tried to flush null page")
+      System.exit(-1)
+    }
+
+    file_descriptor.seek(page_num * Pager.PAGE_BYTES)
+    file_descriptor.write(pages(page_num).data.toArray)
+  }
+}
+
+case object Pager {
+  val PAGE_BYTES    : Int = 4096
+  val ROWS_PER_PAGE : Int = Pager.PAGE_BYTES / UserRow.Column.ROW_BYTES
+
+  def pager_open ( filename: String ) : Pager = {
+    val fd = Paths.get(filename).toFile
+    if ( ! fd.exists() ) {
+      println("Unable to open file")
+      System.exit(-1)
+    }
+
+    Pager(fd)
+  }
+}
 
 case object Table {
-  val PAGE_BYTES      : Int = 4096
   val TABLE_MAX_PAGES : Int = 100
-  val ROWS_PER_PAGE   : Int = PAGE_BYTES / UserRow.Column.ROW_BYTES
-  val TABLE_MAX_ROWS  : Int = ROWS_PER_PAGE * TABLE_MAX_PAGES
+  val TABLE_MAX_ROWS  : Int = Pager.ROWS_PER_PAGE * TABLE_MAX_PAGES
 }
 
 case class Table ( ) {
-  var row_num : Int = 0
-  var pages   : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page](new Page ())
+  var row_num : Int   = 0
+  val pager   : Pager = Pager.pager_open("sqlite.db")
 
   def row_slot ( row_num : Int ) : ( Page , Int ) = {
-    val page_num = row_num / Table.ROWS_PER_PAGE
-    if ( page_num >= this.pages.size ) {
-      // Allocate memory only when we try to access new page
-      this.pages += new Page ()
-    }
-    val page = this.pages(page_num)
-    val row_offset = row_num % Table.ROWS_PER_PAGE
+    val page_num = row_num / Pager.ROWS_PER_PAGE
+    val page = pager.get_page(page_num)
+    val row_offset = row_num % Pager.ROWS_PER_PAGE
     val byte_offset = row_offset * UserRow.Column.ROW_BYTES
     (page, byte_offset)
+  }
+
+  def db_close () : Unit = {
+    val num_full_pages = row_num / Pager.ROWS_PER_PAGE
+
+    for ( i <- 0 until num_full_pages ) {
+      if ( pager.pages(i) != null ) {
+        pager.pager_flush(i, Pager.PAGE_BYTES)
+        pager.pages(i) = null
+      }
+    }
+
+    // There may be a partial page to write to the end of the file
+    // This should not be needed after we switch to a B-tree
+    val num_additional_rows = row_num % Pager.ROWS_PER_PAGE
+    if ( num_additional_rows > 0 ) {
+      val page_num = num_full_pages
+      if ( pager.pages(page_num) != null ) {
+        pager.pager_flush(page_num, num_additional_rows * UserRow.Column.ROW_BYTES)
+        pager.pages(page_num) = null
+      }
+    }
   }
 }
 
