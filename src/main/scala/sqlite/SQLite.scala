@@ -1,16 +1,16 @@
 package sqlite
 
 import java.io.{File, RandomAccessFile}
-import java.nio.file.Paths
+import java.nio.file.{Files, Path, Paths}
 
 import scala.collection.mutable.ArrayBuffer
 
 case class Page ( data : ArrayBuffer[Byte] = new ArrayBuffer[Byte](Pager.PAGE_BYTES) )
 
 case class Pager ( file : File ) {
+
   val file_descriptor : RandomAccessFile = new RandomAccessFile(file, "rw")
 
-  var file_length : Long = file.length()
   var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page](Page ())
 
   def get_page ( page_num : Int ) : Page = {
@@ -19,20 +19,21 @@ case class Pager ( file : File ) {
       this.pages += Page ()
     }
 
-    var num_pages = file_length / Pager.PAGE_BYTES
+    if ( this.pages(page_num).data.size == 0 ) {
+      // Cache miss. Allocate memory and load from file.
+      var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
-    // We might save a partial page at the end of the file
-    if ( file_length % Pager.PAGE_BYTES > 0 ) { num_pages += 1 }
-
-    if ( page_num <= num_pages ) {
-      file_descriptor.seek(page_num * Pager.PAGE_BYTES)
-      val page_data = new Array[Byte](Pager.PAGE_BYTES)
-      val bytes_read = file_descriptor.read(page_data)
-      if ( bytes_read == -1 ) {
-        println(s"Error reading file: '$file_descriptor'")
-        System.exit(-1)
+      // We might save a partial page at the end of the file
+      if (file_descriptor.length() % Pager.PAGE_BYTES > 0) {
+        num_pages += 1
       }
-      this.pages(page_num) = Page ( collection.mutable.ArrayBuffer(page_data: _*) )
+
+      if ( page_num <= num_pages ) {
+        file_descriptor.seek(page_num * Pager.PAGE_BYTES)
+        val page_data = new Array[Byte](Pager.PAGE_BYTES)
+        file_descriptor.read(page_data)
+        this.pages(page_num) = Page(collection.mutable.ArrayBuffer(page_data: _*))
+      }
     }
 
     this.pages(page_num)
@@ -53,13 +54,9 @@ case object Pager {
   val PAGE_BYTES    : Int = 4096
   val ROWS_PER_PAGE : Int = Pager.PAGE_BYTES / UserRow.Column.ROW_BYTES
 
-  def pager_open ( filename: String ) : Pager = {
-    val fd = Paths.get(filename).toFile
-    if ( ! fd.exists() ) {
-      println("Unable to open file")
-      System.exit(-1)
-    }
-
+  def pager_open ( path : Path ) : Pager = {
+    val fd = path.toFile
+    if ( ! Files.exists(path) ) { Files.createFile(path) }
     Pager(fd)
   }
 }
@@ -70,15 +67,17 @@ case object Table {
 }
 
 case class Table ( ) {
-  var row_num : Int   = 0
-  val pager   : Pager = Pager.pager_open("sqlite.db")
+
+  val pager : Pager = Pager.pager_open(Paths.get("sqlite.db") )
+
+  var row_num : Int = ( pager.file_descriptor.length() / UserRow.Column.ROW_BYTES ).toInt
 
   def row_slot ( row_num : Int ) : ( Page , Int ) = {
     val page_num = row_num / Pager.ROWS_PER_PAGE
     val page = pager.get_page(page_num)
     val row_offset = row_num % Pager.ROWS_PER_PAGE
     val byte_offset = row_offset * UserRow.Column.ROW_BYTES
-    (page, byte_offset)
+    ( page , byte_offset )
   }
 
   def db_close () : Unit = {
@@ -178,8 +177,9 @@ object SQLite {
 
   import Table._
 
-  def do_meta_command ( command : String ) : Unit = {
+  def do_meta_command ( command : String , table : Table ) : Unit = {
     if ( ".exit".equals(command) ) {
+      table.db_close()
       System.exit ( 0 )
     } else {
       println(s"Unrecognized command '$command'")
@@ -275,8 +275,8 @@ object SQLite {
 
         val token = scanner.next
 
-        if (token.startsWith(".")) {
-          do_meta_command(token)
+        if ( token.startsWith(".") ) {
+          do_meta_command(token , table)
         }
 
         val line = token + scanner.nextLine
