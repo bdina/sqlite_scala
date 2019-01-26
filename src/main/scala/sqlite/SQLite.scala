@@ -66,6 +66,27 @@ case object Table {
   val TABLE_MAX_ROWS  : Int = Pager.ROWS_PER_PAGE * TABLE_MAX_PAGES
 }
 
+class Cursor ( val table : Table
+             , var row_num : Int
+             , var end_of_table : Boolean /* Indicates a position one past the last element */ )
+{
+
+  def cursor_value () : ( Page , Int ) = {
+    val page_num    = this.row_num / Pager.ROWS_PER_PAGE
+    val page        = table.pager.get_page(page_num)
+    val row_offset  = row_num % Pager.ROWS_PER_PAGE
+    val byte_offset = row_offset * UserRow.Column.ROW_BYTES
+    ( page , byte_offset )
+  }
+
+  def cursor_advance () : Unit = {
+    this.row_num += 1
+    if ( this.row_num >= this.table.row_num ) {
+      this.end_of_table = true
+    }
+  }
+}
+
 case class Table ( ) {
 
   val pager : Pager = Pager.pager_open(Paths.get("sqlite.db") )
@@ -101,6 +122,9 @@ case class Table ( ) {
       }
     }
   }
+
+  def table_start () = new Cursor ( this , 0            , false )
+  def table_end   () = new Cursor ( this , this.row_num , true  )
 }
 
 object StatementType {
@@ -224,7 +248,8 @@ object SQLite {
     }
 
     val row_to_insert = statement.row
-    val ( page , slot ) = table.row_slot(table.row_num)
+    val cursor = table.table_end()
+    val ( page , slot ) = cursor.cursor_value()
     val bytes = UserRow.serialize(row_to_insert)
     page.data.insertAll(slot,bytes)
     table.row_num += 1
@@ -233,11 +258,13 @@ object SQLite {
   }
 
   def execute_select ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
-    for ( i <- 0 until table.row_num ) {
-      val ( page , slot ) = table.row_slot(i)
+    val cursor = table.table_start()
+    while ( ! cursor.end_of_table ) {
+      val ( page , slot ) = cursor.cursor_value()
       val eob = slot + UserRow.Column.ROW_BYTES
       val row = UserRow.deserialze(page.data.slice(slot,eob).toArray)
       println(row)
+      cursor.cursor_advance()
     }
     ExecuteStatement.SUCCESS
   }
