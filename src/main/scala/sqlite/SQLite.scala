@@ -1,9 +1,99 @@
 package sqlite
 
 import java.io.{File, RandomAccessFile}
+import java.nio.ByteBuffer
 import java.nio.file.{Files, Path, Paths}
 
+import sqlite.NodeType.NodeType
+
 import scala.collection.mutable.ArrayBuffer
+
+case object NodeType {
+  sealed trait NodeType
+  case object INTERNAL extends NodeType
+  case object LEAF extends NodeType
+}
+
+/* Common Node Header Layout */
+case object NodeHeaderLayout {
+  val NODE_TYPE_BYTES       : Int = 2
+  val NODE_TYPE_OFFSET      : Int = 0
+  val IS_ROOT_BYTES         : Int = 2
+  val IS_ROOT_OFFSET        : Int = NODE_TYPE_BYTES
+  val PARENT_POINTER_BYTES  : Int = 4
+  val PARENT_POINTER_OFFSET : Int = IS_ROOT_OFFSET + IS_ROOT_BYTES
+  val HEADER_BYTES          : Int = NODE_TYPE_BYTES + IS_ROOT_BYTES + PARENT_POINTER_BYTES
+}
+
+/* Leaf Node Header Layout */
+case object LeafNodeHeaderLayout {
+  val NUM_CELLS_BYTES  : Int = 4
+  val NUM_CELLS_OFFSET : Int = NodeHeaderLayout.HEADER_BYTES
+  val HEADER_BYTES     : Int = NodeHeaderLayout.HEADER_BYTES + NUM_CELLS_BYTES
+}
+
+/* Leaf Node Body Layout */
+case object LeafNodeBodyLayout {
+  val KEY_BYTES       : Int = 4
+  val KEY_OFFSET      : Int = 0
+  val VALUE_BYTES     : Int = UserRow.Column.ROW_BYTES
+  val VALUE_OFFSET    : Int = KEY_OFFSET + KEY_BYTES
+  val CELL_BYTES      : Int = KEY_BYTES + VALUE_BYTES
+  val SPACE_FOR_CELLS : Int = Pager.PAGE_BYTES - NodeHeaderLayout.HEADER_BYTES
+  val MAX_CELLS       : Int = SPACE_FOR_CELLS / CELL_BYTES
+}
+
+case class Node ( node_type : NodeType ) {
+
+  private val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]()
+
+  def num_cells () : Int = {
+    val start = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
+    val end   = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
+    val bytes = data.slice(start,end).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def cell ( cell_num : Int ) : Int = LeafNodeHeaderLayout.HEADER_BYTES + ( cell_num * LeafNodeBodyLayout.CELL_BYTES )
+
+  def key ( cell_num : Int ) : Int = {
+    val start = cell(cell_num)
+    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
+    val bytes = data.slice(start,end).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def value ( cell_num : Int ) : Array[Byte] = {
+    val start = cell(cell_num) + LeafNodeBodyLayout.KEY_BYTES
+    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
+    data.slice(start,end).toArray
+  }
+
+  override def toString : String = {
+    val sb = new StringBuffer()
+    sb.append(f"leaf (size ${num_cells()})")
+    for ( i <- 0 until num_cells ) {
+      sb.append(f" - $i : ${key(i)}")
+    }
+    sb.toString
+  }
+}
+
+case object Node {
+
+  def initialize_leaf_node () : Node = Node ( NodeType.LEAF )
+
+  def print_constants () : Unit = {
+    println(f"ROW_BYTES: ${UserRow.Column.ROW_BYTES}")
+    println(f"COMMON_NODE_HEADER_BYTES: ${NodeHeaderLayout.HEADER_BYTES}")
+    println(f"LEAF_NODE_HEADER_BYTES: ${LeafNodeHeaderLayout.HEADER_BYTES}")
+    println(f"LEAF_NODE_CELL_BYTES: ${LeafNodeBodyLayout.CELL_BYTES}")
+    println(f"LEAF_NODE_SPACE_FOR_CELLS: ${LeafNodeBodyLayout.SPACE_FOR_CELLS}")
+    println(f"LEAF_NODE_MAX_CELLS: ${LeafNodeBodyLayout.MAX_CELLS}")
+  }
+
+  def print_leaf_node ( node : Node ) : Unit = println(node)
+}
 
 case class Page ( data : ArrayBuffer[Byte] = new ArrayBuffer[Byte](Pager.PAGE_BYTES) )
 
