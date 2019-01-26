@@ -11,7 +11,7 @@ import scala.collection.mutable.ArrayBuffer
 case object NodeType {
   sealed trait NodeType
   case object INTERNAL extends NodeType
-  case object LEAF extends NodeType
+  case object LEAF     extends NodeType
 }
 
 /* Common Node Header Layout */
@@ -205,7 +205,7 @@ case class Table ( ) {
     }
   }
 
-  def table_start () = new Cursor ( this , 0            , false )
+  def table_start () = new Cursor ( this , 0  , false )
   def table_end   () = new Cursor ( this , this.row_num , true  )
 }
 
