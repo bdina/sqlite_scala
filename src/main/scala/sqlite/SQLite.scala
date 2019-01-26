@@ -183,14 +183,6 @@ case class Table ( ) {
 
   var row_num : Int = ( pager.file_descriptor.length() / UserRow.Column.ROW_BYTES ).toInt
 
-  def row_slot ( row_num : Int ) : ( Page , Int ) = {
-    val page_num = row_num / Pager.ROWS_PER_PAGE
-    val page = pager.get_page(page_num)
-    val row_offset = row_num % Pager.ROWS_PER_PAGE
-    val byte_offset = row_offset * UserRow.Column.ROW_BYTES
-    ( page , byte_offset )
-  }
-
   def db_close () : Unit = {
     val num_full_pages = row_num / Pager.ROWS_PER_PAGE
 
