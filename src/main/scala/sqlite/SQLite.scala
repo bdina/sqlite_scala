@@ -19,7 +19,7 @@ case class Pager ( file : File ) {
       this.pages += Page ()
     }
 
-    if ( this.pages(page_num).data.size == 0 ) {
+    if ( this.pages(page_num).data.isEmpty ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
