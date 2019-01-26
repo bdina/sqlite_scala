@@ -287,6 +287,12 @@ object SQLite {
     if ( ".exit".equals(command) ) {
       table.db_close()
       System.exit ( 0 )
+    } else if ( ".btree".equals(command) ) {
+      println("Tree:")
+//      Node.print_leaf_node(get_page(table->pager, 0))
+    } else if ( ".constants".equals(command) ) {
+      println("Constants:")
+      Node.print_constants()
     } else {
       println(s"Unrecognized command '$command'")
     }
@@ -386,21 +392,21 @@ object SQLite {
 
         if ( token.startsWith(".") ) {
           do_meta_command(token , table)
-        }
+        } else {
+          val line = token + scanner.nextLine
 
-        val line = token + scanner.nextLine
-
-        prepare_statement(line) match {
-          case ( PrepareStatement.SUCCESS , Some(statement) ) =>
-            execute_statement(statement, table) match {
-              case ExecuteStatement.SUCCESS    => println( "Executed."   )
-              case ExecuteStatement.TABLE_FULL => println( "Table full!" )
-            }
-          case ( PrepareStatement.NEGATIVE_ID            , None ) => println(s"ID must be positive.")
-          case ( PrepareStatement.STRING_TOO_LONG        , None ) => println(s"String is too long.")
-          case ( PrepareStatement.SYNTAX_ERROR           , None ) => println(s"Unrecognized keyword at start of '$line'.")
-          case ( PrepareStatement.UNRECOGNIZED_STATEMENT , None ) => println(s"Unrecognized statement '$line'.")
-          case _ => println(s"Error: '$line'.")
+          prepare_statement(line) match {
+            case (PrepareStatement.SUCCESS, Some(statement)) =>
+              execute_statement(statement, table) match {
+                case ExecuteStatement.SUCCESS => println("Executed.")
+                case ExecuteStatement.TABLE_FULL => println("Table full!")
+              }
+            case (PrepareStatement.NEGATIVE_ID, None) => println(s"ID must be positive.")
+            case (PrepareStatement.STRING_TOO_LONG, None) => println(s"String is too long.")
+            case (PrepareStatement.SYNTAX_ERROR, None) => println(s"Unrecognized keyword at start of '$line'.")
+            case (PrepareStatement.UNRECOGNIZED_STATEMENT, None) => println(s"Unrecognized statement '$line'.")
+            case _ => println(s"Error: '$line'.")
+          }
         }
       } catch {
         case e : Exception => println(s"Error: '${e.getMessage}'.")
