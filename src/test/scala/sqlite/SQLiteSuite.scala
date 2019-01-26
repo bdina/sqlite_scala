@@ -1,6 +1,7 @@
 package sqlite
 
 import java.io.{BufferedReader, BufferedWriter, InputStreamReader, OutputStreamWriter}
+import java.nio.file.{Files, Paths}
 import java.util
 
 import org.scalatest.{FlatSpec, Matchers}
@@ -44,12 +45,16 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "insert and retrieve a row" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result.next should be ( "db > Executed." )
     result.next should be ( "db > (1, user1, person1@example.com)" )
   }
 
   it should "print error message when table is full" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val commands = new util.ArrayList[String]()
     for ( i <- 0 until 4801 ) {
       commands.add(s"insert $i user$i person$i@example.com")
@@ -61,6 +66,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "allow inserting strings that are the maximum length" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val user  = "a"*40
     val email = "a"*40
     val commands = util.List.of(s"insert 1 $user $email" , "select *")
@@ -69,6 +76,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print error message if strings are too long" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val user  = "a"*41
     val email = "a"*41
     val commands = util.Arrays.asList(s"insert 1 $user $email")
@@ -77,11 +86,15 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print error message is id is negative" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val result = run_script(java.util.Arrays.asList("insert -1 user1 person1@example.com")).iterator()
     result.next should be ( "db > ID must be positive." )
   }
 
   it should "keep data after closing connection" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
     val result1 = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result1.next should be ( "db > Executed." )
     result1.next should be ( "db > (1, user1, person1@example.com)" )

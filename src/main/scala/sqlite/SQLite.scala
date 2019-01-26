@@ -46,7 +46,7 @@ case class Pager ( file : File ) {
     }
 
     file_descriptor.seek(page_num * Pager.PAGE_BYTES)
-    file_descriptor.write(pages(page_num).data.toArray)
+    file_descriptor.write(pages(page_num).data.toArray, 0 , size)
   }
 }
 
