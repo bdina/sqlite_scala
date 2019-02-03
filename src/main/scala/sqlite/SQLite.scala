@@ -45,7 +45,7 @@ case object LeafNodeBodyLayout {
 
 case class Node ( node_type : NodeType ) {
 
-  private val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]()
+  val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]()
 
   def num_cells () : Int = {
     val start = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
@@ -67,6 +67,20 @@ case class Node ( node_type : NodeType ) {
     val start = cell(cell_num) + LeafNodeBodyLayout.KEY_BYTES
     val end   = start + LeafNodeBodyLayout.VALUE_BYTES
     data.slice(start,end).toArray
+  }
+
+  def value ( cell_num : Int , key : Int , value : Array[Byte] ) : Unit = {
+    val key_offset = cell ( cell_num )
+    val val_offset = cell ( cell_num )
+
+    val key_bytes = ByteBuffer.allocate(LeafNodeBodyLayout.KEY_BYTES).putInt(key).array()
+    for ( i <- 0 until key_bytes.size ; index <- key_offset until ( key_offset + LeafNodeBodyLayout.KEY_BYTES ) ) {
+      data.update(index, key_bytes(i))
+    }
+
+    for ( i <- value.indices ; index <- val_offset until ( val_offset + value.length ) ) {
+      data.update(index, value(i))
+    }
   }
 
   override def toString : String = {
@@ -95,7 +109,7 @@ case object Node {
   def print_leaf_node ( node : Node ) : Unit = println(node)
 }
 
-case class Page ( data : ArrayBuffer[Byte] = new ArrayBuffer[Byte](Pager.PAGE_BYTES) )
+case class Page ( node : Node = Node.initialize_leaf_node() )
 
 case class Pager ( file : File ) {
 
@@ -109,7 +123,7 @@ case class Pager ( file : File ) {
       this.pages += Page ()
     }
 
-    if ( this.pages(page_num).data.isEmpty ) {
+    if ( this.pages(page_num).node.num_cells() == 0 ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
@@ -122,21 +136,21 @@ case class Pager ( file : File ) {
         file_descriptor.seek(page_num * Pager.PAGE_BYTES)
         val page_data = new Array[Byte](Pager.PAGE_BYTES)
         file_descriptor.read(page_data)
-        this.pages(page_num) = Page(collection.mutable.ArrayBuffer(page_data: _*))
+        this.pages(page_num) = Page ()
       }
     }
 
     this.pages(page_num)
   }
 
-  def pager_flush ( page_num : Int , size : Int ) : Unit = {
+  def pager_flush ( page_num : Int ) : Unit = {
     if ( this.pages(page_num) == null ) {
       println("Tried to flush null page")
       System.exit(-1)
     }
 
     file_descriptor.seek(page_num * Pager.PAGE_BYTES)
-    file_descriptor.write(pages(page_num).data.toArray, 0 , size)
+    file_descriptor.write(pages(page_num).node.data.toArray, 0 , Pager.PAGE_BYTES)
   }
 }
 
@@ -157,21 +171,20 @@ case object Table {
 }
 
 class Cursor ( val table : Table
-             , var row_num : Int
+             , var page_num : Int
+             , var cell_num : Int
              , var end_of_table : Boolean /* Indicates a position one past the last element */ )
 {
 
   def cursor_value () : ( Page , Int ) = {
-    val page_num    = this.row_num / Pager.ROWS_PER_PAGE
-    val page        = table.pager.get_page(page_num)
-    val row_offset  = row_num % Pager.ROWS_PER_PAGE
-    val byte_offset = row_offset * UserRow.Column.ROW_BYTES
-    ( page , byte_offset )
+    val page = table.pager.get_page(page_num)
+    ( page , this.cell_num )
   }
 
   def cursor_advance () : Unit = {
-    this.row_num += 1
-    if ( this.row_num >= this.table.row_num ) {
+    val page = table.pager.get_page(page_num)
+    this.cell_num += 1
+    if ( cell_num >= page.node.num_cells() ) {
       this.end_of_table = true
     }
   }
@@ -181,32 +194,37 @@ case class Table ( ) {
 
   val pager : Pager = Pager.pager_open(Paths.get("sqlite.db") )
 
-  var row_num : Int = ( pager.file_descriptor.length() / UserRow.Column.ROW_BYTES ).toInt
+  var root_page_num : Int = 0
 
   def db_close () : Unit = {
-    val num_full_pages = row_num / Pager.ROWS_PER_PAGE
-
-    for ( i <- 0 until num_full_pages ) {
+    for ( i <- pager.pages.indices ) {
       if ( pager.pages(i) != null ) {
-        pager.pager_flush(i, Pager.PAGE_BYTES)
+        pager.pager_flush(i)
         pager.pages(i) = null
-      }
-    }
-
-    // There may be a partial page to write to the end of the file
-    // This should not be needed after we switch to a B-tree
-    val num_additional_rows = row_num % Pager.ROWS_PER_PAGE
-    if ( num_additional_rows > 0 ) {
-      val page_num = num_full_pages
-      if ( pager.pages(page_num) != null ) {
-        pager.pager_flush(page_num, num_additional_rows * UserRow.Column.ROW_BYTES)
-        pager.pages(page_num) = null
       }
     }
   }
 
-  def table_start () = new Cursor ( this , 0  , false )
-  def table_end   () = new Cursor ( this , this.row_num , true  )
+  def table_start () : Cursor = {
+    val page_num = this.root_page_num
+    val cell_num = 0
+
+    val page = pager.get_page(this.root_page_num)
+    val num_cells = page.node.num_cells()
+    val end_of_table = num_cells == 0
+
+    new Cursor ( this , page_num , cell_num  , end_of_table )
+  }
+
+  def table_end   () : Cursor = {
+    val page_num = this.root_page_num
+
+    val page = pager.get_page(this.root_page_num)
+    val num_cells = page.node.num_cells()
+    val cell_num = num_cells
+
+    new Cursor ( this , page_num , cell_num , true  )
+  }
 }
 
 object StatementType {
@@ -281,8 +299,6 @@ class SQLite {
 
 object SQLite {
 
-  import Table._
-
   def do_meta_command ( command : String , table : Table ) : Unit = {
     if ( ".exit".equals(command) ) {
       table.db_close()
@@ -331,7 +347,8 @@ object SQLite {
   }
 
   def execute_insert ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
-    if ( table.row_num >= TABLE_MAX_ROWS ) {
+    val node = table.pager.get_page(table.root_page_num).node
+    if ( node.num_cells() >= LeafNodeBodyLayout.MAX_CELLS ) {
       return ExecuteStatement.TABLE_FULL
     }
 
@@ -339,8 +356,8 @@ object SQLite {
     val cursor = table.table_end()
     val ( page , slot ) = cursor.cursor_value()
     val bytes = UserRow.serialize(row_to_insert)
-    page.data.insertAll(slot,bytes)
-    table.row_num += 1
+//    page.data.insertAll(slot,bytes)
+//    table.row_num += 1
 
     ExecuteStatement.SUCCESS
   }
@@ -350,8 +367,8 @@ object SQLite {
     while ( ! cursor.end_of_table ) {
       val ( page , slot ) = cursor.cursor_value()
       val eob = slot + UserRow.Column.ROW_BYTES
-      val row = UserRow.deserialze(page.data.slice(slot,eob).toArray)
-      println(row)
+//      val row = UserRow.deserialze(page.data.slice(slot,eob).toArray)
+//      println(row)
       cursor.cursor_advance()
     }
     ExecuteStatement.SUCCESS
