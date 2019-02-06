@@ -45,13 +45,27 @@ case object LeafNodeBodyLayout {
 
 case class Node ( node_type : NodeType ) {
 
-  val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]()
+  private val bytes : Int = LeafNodeHeaderLayout.HEADER_BYTES + LeafNodeBodyLayout.SPACE_FOR_CELLS
+
+  val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(bytes, 0.asInstanceOf[Byte])
 
   def num_cells () : Int = {
     val start = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
     val end   = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
     val bytes = data.slice(start,end).toArray
     ByteBuffer.wrap(bytes).getInt
+  }
+
+  def incr_num_cells () : Int = {
+    val start      = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
+    val end        = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
+    val bytes      = data.slice(start,end).toArray
+    val next       = ByteBuffer.wrap(bytes).getInt + 1
+    val next_bytes = ByteBuffer.allocate(4).putInt(next).array()
+    for ( i <- next_bytes.indices ; index <- start to end ) {
+      data.update(index, next_bytes(i))
+    }
+    next
   }
 
   def cell ( cell_num : Int ) : Int = LeafNodeHeaderLayout.HEADER_BYTES + ( cell_num * LeafNodeBodyLayout.CELL_BYTES )
@@ -128,7 +142,7 @@ case class Pager ( file : File ) {
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
       // We might save a partial page at the end of the file
-      if (file_descriptor.length() % Pager.PAGE_BYTES > 0) {
+      if ( file_descriptor.length() % Pager.PAGE_BYTES > 0 ) {
         num_pages += 1
       }
 
@@ -190,7 +204,7 @@ class Cursor ( val table : Table
   }
 }
 
-case class Table ( ) {
+case class Table ( node : Node = Node.initialize_leaf_node() ) {
 
   val pager : Pager = Pager.pager_open(Paths.get("sqlite.db") )
 
@@ -346,18 +360,18 @@ object SQLite {
     }
   }
 
-  def execute_insert ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
-    val node = table.pager.get_page(table.root_page_num).node
-    if ( node.num_cells() >= LeafNodeBodyLayout.MAX_CELLS ) {
-      return ExecuteStatement.TABLE_FULL
-    }
+  def execute_insert ( statement : Statement , cursor : Cursor ) : ExecuteStatement.Result = {
+    val node = cursor.table.pager.get_page(cursor.table.root_page_num).node
 
-    val row_to_insert = statement.row
-    val cursor = table.table_end()
-    val ( page , slot ) = cursor.cursor_value()
-    val bytes = UserRow.serialize(row_to_insert)
-//    page.data.insertAll(slot,bytes)
-//    table.row_num += 1
+    val num_cells = node.num_cells()
+
+    if ( num_cells > LeafNodeBodyLayout.MAX_CELLS ) { ExecuteStatement.TABLE_FULL }
+
+    node.incr_num_cells()
+    val key = node.key( cursor.cell_num )
+
+    val row = UserRow.serialize(statement.row)
+    node.value( cursor.cell_num , key , row )
 
     ExecuteStatement.SUCCESS
   }
@@ -374,10 +388,10 @@ object SQLite {
     ExecuteStatement.SUCCESS
   }
 
-  def execute_statement ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
+  def execute_statement ( statement : Statement , cursor : Cursor ) : ExecuteStatement.Result = {
     statement.statement_type match {
-      case StatementType.INSERT => execute_insert(statement , table )
-      case StatementType.SELECT => execute_select(statement , table )
+      case StatementType.INSERT => execute_insert(statement , cursor )
+      case StatementType.SELECT => execute_select(statement , cursor.table )
     }
   }
 
@@ -397,7 +411,7 @@ object SQLite {
   }
 
   def main ( args : Array[String] ) : Unit = {
-    val table = Table()
+    val cursor = Table().table_start()
 
     while ( true ) {
       print_prompt()
@@ -408,13 +422,13 @@ object SQLite {
         val token = scanner.next
 
         if ( token.startsWith(".") ) {
-          do_meta_command(token , table)
+          do_meta_command(token , cursor.table)
         } else {
           val line = token + scanner.nextLine
 
           prepare_statement(line) match {
             case (PrepareStatement.SUCCESS, Some(statement)) =>
-              execute_statement(statement, table) match {
+              execute_statement(statement, cursor) match {
                 case ExecuteStatement.SUCCESS => println("Executed.")
                 case ExecuteStatement.TABLE_FULL => println("Table full!")
               }
