@@ -102,4 +102,37 @@ class SQLiteSuite extends FlatSpec with Matchers {
     val result2 = run_script(util.Arrays.asList("select *")).iterator()
     result2.next should be ( "db > (1, user1, person1@example.com)" )
   }
+
+  it should "allow printing out the structure of a one-node btree" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
+    val result = run_script(util.List.of("insert 3 user3 person3@example.com"
+                                       , "insert 1 user1 person1@example.com"
+                                       , "insert 2 user2 person2@example.com"
+                                       , ".exit")).iterator
+
+    result.next should be ( "db > Executed." )
+    result.next should be ( "db > Executed." )
+    result.next should be ( "db > Executed." )
+    result.next should be ( "db > Tree:"     )
+    result.next should be ( "leaf (size 3)"  )
+    result.next should be ( "  - 0 : 3"      )
+    result.next should be ( "  - 1 : 1"      )
+    result.next should be ( "  - 2 : 2"      )
+    result.next should be ( "db > "          )
+  }
+
+  it should "print constants" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
+    val result = run_script(util.List.of(".constants" , ".exit")).iterator
+    result.next should be ( "db > Constants:"                 )
+    result.next should be ( "ROW_BYTES: 293"                  )
+    result.next should be ( "COMMON_NODE_HEADER_BYTES: 6"     )
+    result.next should be ( "LEAF_NODE_HEADER_BYTES: 10"      )
+    result.next should be ( "LEAF_NODE_CELL_BYTES: 297"       )
+    result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4086" )
+    result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
+    result.next should be ( "db > "                           )
+  }
 }
