@@ -16,9 +16,9 @@ case object NodeType {
 
 /* Common Node Header Layout */
 case object NodeHeaderLayout {
-  val NODE_TYPE_BYTES       : Int = 2
+  val NODE_TYPE_BYTES       : Int = 1
   val NODE_TYPE_OFFSET      : Int = 0
-  val IS_ROOT_BYTES         : Int = 2
+  val IS_ROOT_BYTES         : Int = 1
   val IS_ROOT_OFFSET        : Int = NODE_TYPE_BYTES
   val PARENT_POINTER_BYTES  : Int = 4
   val PARENT_POINTER_OFFSET : Int = IS_ROOT_OFFSET + IS_ROOT_BYTES
@@ -72,8 +72,8 @@ case class Node ( node_type : NodeType ) {
 
   def key ( cell_num : Int ) : Int = {
     val start = cell(cell_num)
-    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
-    val bytes = data.slice(start,end).toArray
+    val end   = start + LeafNodeBodyLayout.KEY_BYTES
+    val bytes = data.slice(start,end).toArray.reverse
     ByteBuffer.wrap(bytes).getInt
   }
 
@@ -249,15 +249,15 @@ object StatementType {
 
 case object UserRow {
   case object Column {
-    val ID_BYTES    : Int = 4
-    val USER_BYTES  : Int = 40
-    val EMAIL_BYTES : Int = 40
+    val ID_BYTES     : Int = 4
+    val USER_BYTES   : Int = 145
+    val EMAIL_BYTES  : Int = 145
 
     val ID_OFFSET    : Int = 0
     val USER_OFFSET  : Int = ID_OFFSET + ID_BYTES
     val EMAIL_OFFSET : Int = USER_OFFSET + USER_BYTES
 
-    val ROW_BYTES : Int = ID_BYTES + USER_BYTES + EMAIL_BYTES
+    val ROW_BYTES    : Int = ID_BYTES + USER_BYTES + EMAIL_BYTES
   }
 
   def serialize ( row : UserRow ) : Array[Byte] = {
