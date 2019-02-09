@@ -59,10 +59,13 @@ case class Node ( node_type : NodeType ) {
   def incr_num_cells () : Int = {
     val start      = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
     val end        = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
-    val bytes      = data.slice(start,end).toArray
+    val bytes      = data.slice(start, end).toArray
     val next       = ByteBuffer.wrap(bytes).getInt + 1
     val next_bytes = ByteBuffer.allocate(4).putInt(next).array()
-    for ( i <- next_bytes.indices ; index <- start to end ) {
+
+    for {
+      ( index , i ) <- ( start until end ) zip ( next_bytes.indices )
+    } yield {
       data.update(index, next_bytes(i))
     }
     next
@@ -88,11 +91,15 @@ case class Node ( node_type : NodeType ) {
     val val_offset = cell ( cell_num )
 
     val key_bytes = ByteBuffer.allocate(LeafNodeBodyLayout.KEY_BYTES).putInt(key).array()
-    for ( i <- 0 until key_bytes.size ; index <- key_offset until ( key_offset + LeafNodeBodyLayout.KEY_BYTES ) ) {
+    for {
+      ( index , i ) <- ( key_offset until ( key_offset + LeafNodeBodyLayout.KEY_BYTES ) ) zip ( 0 until key_bytes.size )
+    } yield {
       data.update(index, key_bytes(i))
     }
 
-    for ( i <- value.indices ; index <- val_offset until ( val_offset + value.length ) ) {
+    for {
+      ( index , i ) <- ( val_offset until ( val_offset + value.length ) ) zip ( value.indices )
+    } yield {
       data.update(index, value(i))
     }
   }
@@ -381,8 +388,8 @@ object SQLite {
     while ( ! cursor.end_of_table ) {
       val ( page , slot ) = cursor.cursor_value()
       val eob = slot + UserRow.Column.ROW_BYTES
-//      val row = UserRow.deserialze(page.data.slice(slot,eob).toArray)
-//      println(row)
+      val row = UserRow.deserialze(page.node.data.slice(slot,eob).toArray)
+      println(row)
       cursor.cursor_advance()
     }
     ExecuteStatement.SUCCESS
