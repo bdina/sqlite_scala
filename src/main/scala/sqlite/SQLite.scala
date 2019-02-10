@@ -88,7 +88,7 @@ case class Node ( node_type : NodeType ) {
 
   def value ( cell_num : Int , key : Int , value : Array[Byte] ) : Unit = {
     val key_offset = cell ( cell_num )
-    val val_offset = cell ( cell_num )
+    val val_offset = key_offset + LeafNodeBodyLayout.KEY_BYTES
 
     val key_bytes = ByteBuffer.allocate(LeafNodeBodyLayout.KEY_BYTES).putInt(key).array()
     for {
@@ -326,7 +326,7 @@ object SQLite {
       System.exit ( 0 )
     } else if ( ".btree".equals(command) ) {
       println("Tree:")
-//      Node.print_leaf_node(get_page(table->pager, 0))
+      Node.print_leaf_node(table.table_start().table.node)
     } else if ( ".constants".equals(command) ) {
       println("Constants:")
       Node.print_constants()
@@ -375,8 +375,8 @@ object SQLite {
     if ( num_cells > LeafNodeBodyLayout.MAX_CELLS ) { ExecuteStatement.TABLE_FULL }
 
     node.incr_num_cells()
-    val key = node.key( cursor.cell_num )
 
+    val key = statement.row.id
     val row = UserRow.serialize(statement.row)
     node.value( cursor.cell_num , key , row )
 
@@ -387,8 +387,7 @@ object SQLite {
     val cursor = table.table_start()
     while ( ! cursor.end_of_table ) {
       val ( page , slot ) = cursor.cursor_value()
-      val eob = slot + UserRow.Column.ROW_BYTES
-      val row = UserRow.deserialze(page.node.data.slice(slot,eob).toArray)
+      val row = UserRow.deserialze(page.node.value(cursor.cell_num))
       println(row)
       cursor.cursor_advance()
     }
