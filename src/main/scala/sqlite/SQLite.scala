@@ -76,7 +76,7 @@ case class Node ( node_type : NodeType ) {
   def key ( cell_num : Int ) : Int = {
     val start = cell(cell_num)
     val end   = start + LeafNodeBodyLayout.KEY_BYTES
-    val bytes = data.slice(start,end).toArray.reverse
+    val bytes = data.slice(start,end).toArray
     ByteBuffer.wrap(bytes).getInt
   }
 
@@ -127,7 +127,14 @@ case object Node {
     println(f"LEAF_NODE_MAX_CELLS: ${LeafNodeBodyLayout.MAX_CELLS}")
   }
 
-  def print_leaf_node ( node : Node ) : Unit = println(node)
+  def print_leaf_node ( node : Node ) : Unit = {
+    val num_cells = node.num_cells()
+    println(s"leaf (size $num_cells)")
+    for ( i <- 0 until num_cells ) {
+      val key = node.key(i)
+      println(s"  - $i : $key")
+    }
+  }
 }
 
 case class Page ( node : Node = Node.initialize_leaf_node() )
@@ -326,7 +333,7 @@ object SQLite {
       System.exit ( 0 )
     } else if ( ".btree".equals(command) ) {
       println("Tree:")
-      Node.print_leaf_node(table.table_start().table.node)
+      Node.print_leaf_node(table.pager.get_page(0).node)
     } else if ( ".constants".equals(command) ) {
       println("Constants:")
       Node.print_constants()
