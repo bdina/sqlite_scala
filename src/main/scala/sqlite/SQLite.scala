@@ -43,11 +43,8 @@ case object LeafNodeBodyLayout {
   val MAX_CELLS       : Int = SPACE_FOR_CELLS / CELL_BYTES
 }
 
-case class Node ( node_type : NodeType ) {
-
-  private val bytes : Int = LeafNodeHeaderLayout.HEADER_BYTES + LeafNodeBodyLayout.SPACE_FOR_CELLS
-
-  val data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(bytes, 0.asInstanceOf[Byte])
+case class Node ( node_type : NodeType
+                , data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.bytes, 0.asInstanceOf[Byte]) ) {
 
   def num_cells () : Int = {
     val start = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
@@ -116,6 +113,8 @@ case class Node ( node_type : NodeType ) {
 
 case object Node {
 
+  val bytes : Int = LeafNodeHeaderLayout.HEADER_BYTES + LeafNodeBodyLayout.SPACE_FOR_CELLS
+
   def initialize_leaf_node () : Node = Node ( NodeType.LEAF )
 
   def print_constants () : Unit = {
@@ -164,7 +163,7 @@ case class Pager ( file : File ) {
         file_descriptor.seek(page_num * Pager.PAGE_BYTES)
         val page_data = new Array[Byte](Pager.PAGE_BYTES)
         file_descriptor.read(page_data)
-        this.pages(page_num) = Page ()
+        this.pages(page_num) = Page ( Node ( NodeType.LEAF , ArrayBuffer[Byte](page_data:_*) ))
       }
     }
 

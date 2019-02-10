@@ -127,11 +127,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
 
     val result = run_script(util.List.of(".constants" , ".exit")).iterator
     result.next should be ( "db > Constants:"                 )
-    result.next should be ( "ROW_BYTES: 293"                  )
+    result.next should be ( "ROW_BYTES: 294"                  )
     result.next should be ( "COMMON_NODE_HEADER_BYTES: 6"     )
     result.next should be ( "LEAF_NODE_HEADER_BYTES: 10"      )
-    result.next should be ( "LEAF_NODE_CELL_BYTES: 297"       )
-    result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4086" )
+    result.next should be ( "LEAF_NODE_CELL_BYTES: 298"       )
+    result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4090" )
     result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
     result.next should be ( "db > "                           )
   }
