@@ -64,7 +64,7 @@ case class Node ( node_type : NodeType ) {
     val next_bytes = ByteBuffer.allocate(4).putInt(next).array()
 
     for {
-      ( index , i ) <- ( start until end ) zip ( next_bytes.indices )
+      ( index , i ) <- ( start until end ) zip next_bytes.indices
     } yield {
       data.update(index, next_bytes(i))
     }
@@ -98,7 +98,7 @@ case class Node ( node_type : NodeType ) {
     }
 
     for {
-      ( index , i ) <- ( val_offset until ( val_offset + value.length ) ) zip ( value.indices )
+      ( index , i ) <- ( val_offset until ( val_offset + value.length ) ) zip value.indices
     } yield {
       data.update(index, value(i))
     }
@@ -403,7 +403,7 @@ object SQLite {
 
   def execute_statement ( statement : Statement , cursor : Cursor ) : ExecuteStatement.Result = {
     statement.statement_type match {
-      case StatementType.INSERT => execute_insert(statement , cursor )
+      case StatementType.INSERT => execute_insert(statement , cursor.table.table_end() )
       case StatementType.SELECT => execute_select(statement , cursor.table )
     }
   }
