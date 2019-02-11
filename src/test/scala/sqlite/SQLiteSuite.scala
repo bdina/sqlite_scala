@@ -56,11 +56,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
     val commands = new util.ArrayList[String]()
-    for ( i <- 0 until 4801 ) {
+    for ( i <- 0 until 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
     val result = run_script(commands).iterator()
-    for ( _ <- 1 until 4801 ) { result.next should be ( "db > Executed." ) }
+    for ( _ <- 1 until 14 ) { result.next should be ( "db > Executed." ) }
 
     result.next should be ( "db > Table full!" )
   }
@@ -68,8 +68,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
   it should "allow inserting strings that are the maximum length" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
-    val user  = "a"*40
-    val email = "a"*40
+    val user  = "a"*145
+    val email = "a"*145
     val commands = util.List.of(s"insert 1 $user $email" , "select *")
     val result = run_script(commands).iterator()
     result.next should be ( "db > Executed." )
@@ -78,8 +78,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
   it should "print error message if strings are too long" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
-    val user  = "a"*41
-    val email = "a"*41
+    val user  = "a"*146
+    val email = "a"*146
     val commands = util.Arrays.asList(s"insert 1 $user $email")
     val result = run_script(commands).iterator()
     result.next should be ( "db > String is too long." )
@@ -109,7 +109,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     val result = run_script(util.List.of("insert 3 user3 person3@example.com"
                                        , "insert 1 user1 person1@example.com"
                                        , "insert 2 user2 person2@example.com"
-                                       , ".exit")).iterator
+                                       , ".btree")).iterator
 
     result.next should be ( "db > Executed." )
     result.next should be ( "db > Executed." )
@@ -119,13 +119,16 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "  - 0 : 3"      )
     result.next should be ( "  - 1 : 1"      )
     result.next should be ( "  - 2 : 2"      )
-    result.next should be ( "db > "          )
+    result.next should be ( "db > Executed." )
   }
 
   it should "print constants" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
-    val result = run_script(util.List.of(".constants" , ".exit")).iterator
+    val list = new util.ArrayList[String]()
+    list.add ( ".constants" )
+
+    val result = run_script(list).iterator
     result.next should be ( "db > Constants:"                 )
     result.next should be ( "ROW_BYTES: 294"                  )
     result.next should be ( "COMMON_NODE_HEADER_BYTES: 6"     )
@@ -133,6 +136,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "LEAF_NODE_CELL_BYTES: 298"       )
     result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4090" )
     result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
-    result.next should be ( "db > "                           )
+    result.next should be ( "db > Executed." )
   }
 }

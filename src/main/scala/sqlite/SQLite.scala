@@ -378,7 +378,9 @@ object SQLite {
 
     val num_cells = node.num_cells()
 
-    if ( num_cells > LeafNodeBodyLayout.MAX_CELLS ) { ExecuteStatement.TABLE_FULL }
+    if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
+      return ExecuteStatement.TABLE_FULL
+    }
 
     node.incr_num_cells()
 
