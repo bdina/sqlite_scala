@@ -87,6 +87,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
     val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result.next should be ( "db > Executed." )
     result.next should be ( "db > (1, user1, person1@example.com)" )
+    result.next should be ( "Executed."                            )
+    result.next should be ( "db > "                                )
   }
 
   it should "print error message when table is full" in {
@@ -174,5 +176,21 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4090" )
     result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
     result.next should be ( "db > "                           )
+  }
+
+  it should "prints an error message if there is a duplicate id" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
+    val result = run_script(util.List.of(
+        "insert 1 user1 person1@example.com"
+      , "insert 1 user1 person1@example.com"
+      , "select")).iterator
+
+    result.next should be ( "db > Executed."                       )
+    result.next should be ( "db > Executed."                       )
+    result.next should be ( "db > Error: Duplicate key."           )
+    result.next should be ( "db > (1, user1, person1@example.com)" )
+    result.next should be ( "Executed."                            )
+    result.next should be ( "db > "                                )
   }
 }
