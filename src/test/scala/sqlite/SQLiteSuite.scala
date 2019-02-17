@@ -1,8 +1,10 @@
 package sqlite
 
-import java.io.{BufferedReader, BufferedWriter, InputStreamReader, OutputStreamWriter}
+import java.io.{InputStreamReader, OutputStreamWriter}
+import java.nio.CharBuffer
 import java.nio.file.{Files, Paths}
 import java.util
+import java.util.concurrent.TimeUnit
 
 import org.scalatest.{FlatSpec, Matchers}
 import org.junit.runner.RunWith
@@ -14,32 +16,67 @@ class SQLiteSuite extends FlatSpec with Matchers {
   def run_script ( commands : util.List[String] ) : util.List[String] = {
     val process = new ProcessBuilder("./db").start()
 
-    val stdin  = new BufferedWriter( new OutputStreamWriter( process.getOutputStream ))
-    val stdout = new BufferedReader( new InputStreamReader ( process.getInputStream  ))
+    val os     = process.getOutputStream
+    val stdin  = new OutputStreamWriter ( os )
+    val is     = process.getInputStream
+    val stdout = new InputStreamReader  ( is )
 
-    val out = new util.ArrayList[String]()
+    val out  = new util.ArrayList[String]()
+
+    val sbuf = new StringBuffer()
 
     commands.forEach(c => {
       try {
-        stdin.write(c)
-        stdin.newLine()
+        val cmd_line = s"$c\r\n"
+        stdin.write(cmd_line)
         stdin.flush()
-        out.add(stdout.readLine())
+
+        os.flush()
+
+        TimeUnit.MILLISECONDS.sleep(1000L)
+
+        val cbuf = CharBuffer.allocate(8192)
+
+        var chars = is.available()
+        var total = 0
+        while ( chars > 0 ) {
+          total += stdout.read(cbuf)
+          chars  = is.available()
+        }
+
+        sbuf.append(cbuf.array() , 0 , total)
+
       } catch {
         case e : Exception => println(e) ; stdin.close() ; stdout.close()
       }
     })
 
     try {
-      stdin.write(f".exit%n")
-      stdin.newLine()
+      stdin.write(s".exit\r\n")
       stdin.flush()
+
+      os.flush()
+
+      TimeUnit.MILLISECONDS.sleep(1000L)
+
+      val cbuf = CharBuffer.allocate(8192)
+
+      var chars = is.available()
+      var total = 0
+      while ( chars > 0 ) {
+        total += stdout.read(cbuf)
+        chars = is.available()
+      }
+
+      sbuf.append(cbuf.array(), 0, total)
     } catch {
       case e : Exception => println(e)
     } finally {
       stdin.close()
       stdout.close()
     }
+
+    sbuf.toString.split("\n").foreach(l => out.add(l))
 
     out
   }
@@ -56,7 +93,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
     val commands = new util.ArrayList[String]()
-    for ( i <- 0 until 14 ) {
+    for ( i <- 0 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
     val result = run_script(commands).iterator()
@@ -119,7 +156,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "  - 0 : 3"      )
     result.next should be ( "  - 1 : 1"      )
     result.next should be ( "  - 2 : 2"      )
-    result.next should be ( "db > Executed." )
+    result.next should be ( "db > "          )
   }
 
   it should "print constants" in {
@@ -136,6 +173,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "LEAF_NODE_CELL_BYTES: 298"       )
     result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4090" )
     result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
-    result.next should be ( "db > Executed." )
+    result.next should be ( "db > "                           )
   }
 }
