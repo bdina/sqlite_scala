@@ -142,15 +142,10 @@ case class Pager ( file : File ) {
 
   val file_descriptor : RandomAccessFile = new RandomAccessFile(file, "rw")
 
-  var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page](Page ())
+  var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page]()
 
   def get_page ( page_num : Int ) : Page = {
-    if ( page_num >= this.pages.size ) {
-      // Allocate memory only when we try to access new page
-      this.pages += Page ()
-    }
-
-    if ( this.pages(page_num).node.num_cells() == 0 ) {
+    if ( this.pages.isEmpty || ( this.pages.length >= page_num && this.pages(page_num) == null ) ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
@@ -159,11 +154,22 @@ case class Pager ( file : File ) {
         num_pages += 1
       }
 
+      var page_data = ArrayBuffer[Byte]()
       if ( page_num <= num_pages ) {
         file_descriptor.seek(page_num * Pager.PAGE_BYTES)
-        val page_data = new Array[Byte](Pager.PAGE_BYTES)
-        file_descriptor.read(page_data)
-        this.pages(page_num) = Page ( Node ( NodeType.LEAF , ArrayBuffer[Byte](page_data:_*) ))
+        val data = new Array[Byte](Pager.PAGE_BYTES)
+        file_descriptor.read(data)
+        page_data = ArrayBuffer[Byte](data:_*)
+      }
+
+      if ( this.pages.length <= page_num ) {
+        this.pages += Page ( Node ( NodeType.LEAF , page_data ) )
+      } else {
+        this.pages(page_num) = Page ( Node ( NodeType.LEAF , page_data ) )
+      }
+
+      if ( page_num >= num_pages ) {
+        num_pages = page_num + 1
       }
     }
 
@@ -217,7 +223,7 @@ class Cursor ( val table : Table
   }
 }
 
-case class Table ( node : Node = Node.initialize_leaf_node() ) {
+case class Table () {
 
   val pager : Pager = Pager.pager_open(Paths.get("sqlite.db") )
 
@@ -243,14 +249,56 @@ case class Table ( node : Node = Node.initialize_leaf_node() ) {
     new Cursor ( this , page_num , cell_num  , end_of_table )
   }
 
-  def table_end   () : Cursor = {
-    val page_num = this.root_page_num
+//  def table_end   () : Cursor = {
+//    val page_num = this.root_page_num
+//
+//    val page = pager.get_page(this.root_page_num)
+//    val num_cells = page.node.num_cells()
+//    val cell_num = num_cells
+//
+//    new Cursor ( this , page_num , cell_num , true  )
+//  }
 
-    val page = pager.get_page(this.root_page_num)
+  /**
+    * Return the position of the given key. If the key is not present, return the position where it should be inserted
+    */
+  def table_find ( key : Int ) : Cursor = {
+    val root_page_num = this.root_page_num
+    var root_node = pager.get_page(root_page_num).node
+
+    if ( root_node.node_type == NodeType.LEAF ) {
+      leaf_node_find(root_page_num, key)
+    } else {
+      println("Need to implement searching an internal node")
+      null /* code replaced system.exit -1 */
+    }
+  }
+
+  def leaf_node_find ( page_num : Int , key : Int ) : Cursor = {
+    val page = pager.get_page ( page_num )
     val num_cells = page.node.num_cells()
-    val cell_num = num_cells
 
-    new Cursor ( this , page_num , cell_num , true  )
+    val cursor = new Cursor ( this , page_num , num_cells , false )
+
+    // Binary search
+    var min_index = 0
+    var one_past_max_index = num_cells
+    while ( one_past_max_index != min_index ) {
+      val index = ( min_index + one_past_max_index ) / 2
+      val key_at_index = page.node.key(index)
+      if ( key == key_at_index ) {
+        cursor.cell_num = index
+        return cursor
+      }
+      if ( key < key_at_index ) {
+        one_past_max_index = index
+      } else {
+        min_index = index + 1
+      }
+    }
+
+    cursor.cell_num = min_index
+    cursor
   }
 }
 
@@ -316,8 +364,9 @@ object PrepareStatement {
 
 object ExecuteStatement {
   sealed trait Result
-  case object SUCCESS    extends Result
-  case object TABLE_FULL extends Result
+  case object SUCCESS       extends Result
+  case object DUPLICATE_KEY extends Result
+  case object TABLE_FULL    extends Result
 }
 
 class SQLite {
@@ -373,10 +422,22 @@ object SQLite {
     }
   }
 
-  def execute_insert ( statement : Statement , cursor : Cursor ) : ExecuteStatement.Result = {
-    val node = cursor.table.pager.get_page(cursor.table.root_page_num).node
+  def execute_insert ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
+    val row_to_insert = statement.row
+    val key_to_insert = row_to_insert.id
+
+    val cursor = table.table_find(key_to_insert)
+
+    val node = table.pager.get_page(table.root_page_num).node
 
     val num_cells = node.num_cells()
+
+    if ( cursor.cell_num < num_cells ) {
+      val key_at_index = node.key(cursor.cell_num)
+      if ( key_at_index == key_to_insert ) {
+        return ExecuteStatement.DUPLICATE_KEY
+      }
+    }
 
     if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
       return ExecuteStatement.TABLE_FULL
@@ -384,9 +445,7 @@ object SQLite {
 
     node.incr_num_cells()
 
-    val key = statement.row.id
-    val row = UserRow.serialize(statement.row)
-    node.value( cursor.cell_num , key , row )
+    node.value( cursor.cell_num , key_to_insert , UserRow.serialize(row_to_insert) )
 
     ExecuteStatement.SUCCESS
   }
@@ -394,7 +453,7 @@ object SQLite {
   def execute_select ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
     val cursor = table.table_start()
     while ( ! cursor.end_of_table ) {
-      val ( page , slot ) = cursor.cursor_value()
+      val ( page , _ ) = cursor.cursor_value()
       val row = UserRow.deserialze(page.node.value(cursor.cell_num))
       println(row)
       cursor.cursor_advance()
@@ -402,10 +461,10 @@ object SQLite {
     ExecuteStatement.SUCCESS
   }
 
-  def execute_statement ( statement : Statement , cursor : Cursor ) : ExecuteStatement.Result = {
+  def execute_statement ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
     statement.statement_type match {
-      case StatementType.INSERT => execute_insert(statement , cursor.table.table_end() )
-      case StatementType.SELECT => execute_select(statement , cursor.table )
+      case StatementType.INSERT => execute_insert(statement , table )
+      case StatementType.SELECT => execute_select(statement , table )
     }
   }
 
@@ -425,7 +484,7 @@ object SQLite {
   }
 
   def main ( args : Array[String] ) : Unit = {
-    val cursor = Table().table_start()
+    val table = Table()
 
     while ( true ) {
       print_prompt()
@@ -436,15 +495,16 @@ object SQLite {
         val token = scanner.next
 
         if ( token.startsWith(".") ) {
-          do_meta_command(token , cursor.table)
+          do_meta_command(token , table)
         } else {
           val line = token + scanner.nextLine
 
           prepare_statement(line) match {
             case (PrepareStatement.SUCCESS, Some(statement)) =>
-              execute_statement(statement, cursor) match {
-                case ExecuteStatement.SUCCESS => println("Executed.")
-                case ExecuteStatement.TABLE_FULL => println("Table full!")
+              execute_statement(statement, table) match {
+                case ExecuteStatement.SUCCESS       => println( "Executed."             )
+                case ExecuteStatement.DUPLICATE_KEY => println( "Error: Duplicate key." )
+                case ExecuteStatement.TABLE_FULL    => println( "Table full!"           )
               }
             case (PrepareStatement.NEGATIVE_ID, None) => println(s"ID must be positive.")
             case (PrepareStatement.STRING_TOO_LONG, None) => println(s"String is too long.")
