@@ -77,15 +77,8 @@ case class Node ( node_type : NodeType
     ByteBuffer.wrap(bytes).getInt
   }
 
-  def value ( cell_num : Int ) : Array[Byte] = {
-    val start = cell(cell_num) + LeafNodeBodyLayout.KEY_BYTES
-    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
-    data.slice(start,end).toArray
-  }
-
-  def value ( cell_num : Int , key : Int , value : Array[Byte] ) : Unit = {
+  def key ( cell_num : Int , key : Int ) : Unit = {
     val key_offset = cell ( cell_num )
-    val val_offset = key_offset + LeafNodeBodyLayout.KEY_BYTES
 
     val key_bytes = ByteBuffer.allocate(LeafNodeBodyLayout.KEY_BYTES).putInt(key).array()
     for {
@@ -93,12 +86,28 @@ case class Node ( node_type : NodeType
     } yield {
       data.update(index, key_bytes(i))
     }
+  }
+
+  def value ( cell_num : Int ) : Array[Byte] = {
+    val start = cell(cell_num) + LeafNodeBodyLayout.KEY_BYTES
+    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
+    data.slice(start,end).toArray
+  }
+
+  def value ( cell_num : Int , value : Array[Byte] ) : Unit = {
+    val key_offset = cell ( cell_num )
+    val val_offset = key_offset + LeafNodeBodyLayout.KEY_BYTES
 
     for {
       ( index , i ) <- ( val_offset until ( val_offset + value.length ) ) zip value.indices
     } yield {
       data.update(index, value(i))
     }
+  }
+
+  def key_and_value ( cell_num : Int , key : Int , value : Array[Byte] ) : Unit = {
+    this.key   ( cell_num , key   )
+    this.value ( cell_num , value )
   }
 
   override def toString : String = {
@@ -249,22 +258,12 @@ case class Table () {
     new Cursor ( this , page_num , cell_num  , end_of_table )
   }
 
-//  def table_end   () : Cursor = {
-//    val page_num = this.root_page_num
-//
-//    val page = pager.get_page(this.root_page_num)
-//    val num_cells = page.node.num_cells()
-//    val cell_num = num_cells
-//
-//    new Cursor ( this , page_num , cell_num , true  )
-//  }
-
   /**
     * Return the position of the given key. If the key is not present, return the position where it should be inserted
     */
   def table_find ( key : Int ) : Cursor = {
     val root_page_num = this.root_page_num
-    var root_node = pager.get_page(root_page_num).node
+    val root_node = pager.get_page(root_page_num).node
 
     if ( root_node.node_type == NodeType.LEAF ) {
       leaf_node_find(root_page_num, key)
@@ -422,15 +421,42 @@ object SQLite {
     }
   }
 
+  private def leaf_node_insert ( cursor : Cursor , key : Int , row : UserRow ) : Unit = {
+    val node = cursor.table.pager.get_page(cursor.page_num).node
+
+    val num_cells = node.num_cells()
+    if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
+      println("Need to implement splitting a leaf node.")
+    }
+
+    if ( cursor.cell_num < num_cells ) {
+      // Make room for new cell
+      for ( i <- num_cells until cursor.cell_num by -1 ) {
+        val dest = node.cell(i)
+        val src  = node.cell(i - 1)
+
+        val src_bytes = node.data.slice(src, src + LeafNodeBodyLayout.CELL_BYTES)
+
+        src_bytes.foldLeft ( dest ) { (index,byte) => node.data.update ( index , byte ) ; index + 1 }
+      }
+    }
+
+    node.incr_num_cells()
+
+    node.key_and_value( cursor.cell_num , key , UserRow.serialize(row) )
+  }
+
   def execute_insert ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
+    val node      = table.pager.get_page(table.root_page_num).node
+    val num_cells = node.num_cells()
+    if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
+      return ExecuteStatement.TABLE_FULL
+    }
+
     val row_to_insert = statement.row
     val key_to_insert = row_to_insert.id
 
     val cursor = table.table_find(key_to_insert)
-
-    val node = table.pager.get_page(table.root_page_num).node
-
-    val num_cells = node.num_cells()
 
     if ( cursor.cell_num < num_cells ) {
       val key_at_index = node.key(cursor.cell_num)
@@ -439,13 +465,7 @@ object SQLite {
       }
     }
 
-    if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
-      return ExecuteStatement.TABLE_FULL
-    }
-
-    node.incr_num_cells()
-
-    node.value( cursor.cell_num , key_to_insert , UserRow.serialize(row_to_insert) )
+    leaf_node_insert(cursor, key_to_insert, row_to_insert)
 
     ExecuteStatement.SUCCESS
   }
