@@ -84,7 +84,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
   it should "insert and retrieve a row" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
-    val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
+    val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select")).iterator()
     result.next should be ( "db > Executed." )
     result.next should be ( "db > (1, user1, person1@example.com)" )
     result.next should be ( "Executed."                            )
@@ -109,7 +109,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
 
     val user  = "a"*145
     val email = "a"*145
-    val commands = util.List.of(s"insert 1 $user $email" , "select *")
+    val commands = util.List.of(s"insert 1 $user $email" , "select")
     val result = run_script(commands).iterator()
     result.next should be ( "db > Executed." )
   }
@@ -134,11 +134,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
   it should "keep data after closing connection" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
-    val result1 = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
+    val result1 = run_script(util.List.of("insert 1 user1 person1@example.com" , "select")).iterator()
     result1.next should be ( "db > Executed." )
     result1.next should be ( "db > (1, user1, person1@example.com)" )
 
-    val result2 = run_script(util.Arrays.asList("select *")).iterator()
+    val result2 = run_script(util.Arrays.asList("select")).iterator()
     result2.next should be ( "db > (1, user1, person1@example.com)" )
   }
 
@@ -155,9 +155,9 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "db > Executed." )
     result.next should be ( "db > Tree:"     )
     result.next should be ( "leaf (size 3)"  )
-    result.next should be ( "  - 0 : 3"      )
-    result.next should be ( "  - 1 : 1"      )
-    result.next should be ( "  - 2 : 2"      )
+    result.next should be ( "  - 0 : 1"      )
+    result.next should be ( "  - 1 : 2"      )
+    result.next should be ( "  - 2 : 3"      )
     result.next should be ( "db > "          )
   }
 
@@ -186,11 +186,10 @@ class SQLiteSuite extends FlatSpec with Matchers {
       , "insert 1 user1 person1@example.com"
       , "select")).iterator
 
-    result.next should be ( "db > Executed."                       )
-    result.next should be ( "db > Executed."                       )
-    result.next should be ( "db > Error: Duplicate key."           )
-    result.next should be ( "db > (1, user1, person1@example.com)" )
-    result.next should be ( "Executed."                            )
-    result.next should be ( "db > "                                )
+    result.next should be ( "db > Executed."                        )
+    result.next should be ( "db > Error: Duplicate key."            )
+    result.next should be ( "db > (1, user1, person1@example.com)." )
+    result.next should be ( "Executed."                             )
+    result.next should be ( "db > "                                 )
   }
 }
