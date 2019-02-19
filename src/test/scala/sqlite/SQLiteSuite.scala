@@ -33,7 +33,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
 
         os.flush()
 
-        TimeUnit.MILLISECONDS.sleep(1000L)
+        TimeUnit.MILLISECONDS.sleep(1500L)
 
         val cbuf = CharBuffer.allocate(8192)
 
@@ -45,7 +45,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
         }
 
         sbuf.append(cbuf.array() , 0 , total)
-
       } catch {
         case e : Exception => println(e) ; stdin.close() ; stdout.close()
       }
@@ -57,7 +56,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
 
       os.flush()
 
-      TimeUnit.MILLISECONDS.sleep(1000L)
+      TimeUnit.MILLISECONDS.sleep(1500L)
 
       val cbuf = CharBuffer.allocate(8192)
 
