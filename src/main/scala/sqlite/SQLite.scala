@@ -34,13 +34,29 @@ case object LeafNodeHeaderLayout {
 
 /* Leaf Node Body Layout */
 case object LeafNodeBodyLayout {
-  val KEY_BYTES       : Int = 4
-  val KEY_OFFSET      : Int = 0
-  val VALUE_BYTES     : Int = UserRow.Column.ROW_BYTES
-  val VALUE_OFFSET    : Int = KEY_OFFSET + KEY_BYTES
-  val CELL_BYTES      : Int = KEY_BYTES + VALUE_BYTES
-  val SPACE_FOR_CELLS : Int = Pager.PAGE_BYTES - NodeHeaderLayout.HEADER_BYTES
-  val MAX_CELLS       : Int = SPACE_FOR_CELLS / CELL_BYTES
+  val KEY_BYTES         : Int = 4
+  val KEY_OFFSET        : Int = 0
+  val VALUE_BYTES       : Int = UserRow.Column.ROW_BYTES
+  val VALUE_OFFSET      : Int = KEY_OFFSET + KEY_BYTES
+  val CELL_BYTES        : Int = KEY_BYTES + VALUE_BYTES
+  val SPACE_FOR_CELLS   : Int = Pager.PAGE_BYTES - NodeHeaderLayout.HEADER_BYTES
+  val MAX_CELLS         : Int = SPACE_FOR_CELLS / CELL_BYTES
+  val RIGHT_SPLIT_COUNT : Int = ( MAX_CELLS + 1 ) / 2
+  val LEFT_SPLIT_COUNT  : Int = ( MAX_CELLS + 1 ) - RIGHT_SPLIT_COUNT
+}
+
+case object InternalNodeHeaderLayout {
+  val NUM_KEYS_SIZE      : Int = 4
+  val NUM_KEYS_OFFSET    : Int = NodeHeaderLayout.HEADER_BYTES
+  val RIGHT_CHILD_SIZE   : Int = 4
+  val RIGHT_CHILD_OFFSET : Int = NUM_KEYS_OFFSET + NUM_KEYS_SIZE
+  val HEADER_SIZE        : Int = NodeHeaderLayout.HEADER_BYTES + NUM_KEYS_SIZE + RIGHT_CHILD_SIZE
+}
+
+case object InternalNodeBodyLayout {
+  val KEY_SIZE   : Int = 4
+  val CHILD_SIZE : Int = 4
+  val CELL_SIZE  : Int = CHILD_SIZE + KEY_SIZE
 }
 
 case class Node ( node_type : NodeType
@@ -51,6 +67,18 @@ case class Node ( node_type : NodeType
     val end   = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
     val bytes = data.slice(start,end).toArray
     ByteBuffer.wrap(bytes).getInt
+  }
+
+  def num_cells ( num : Int ) : Unit = {
+    val start      = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
+    val end        = start + LeafNodeHeaderLayout.NUM_CELLS_BYTES
+    val next_bytes = ByteBuffer.allocate(4).putInt(num).array()
+
+    for {
+      ( index , i ) <- ( start until end ) zip next_bytes.indices
+    } yield {
+      data.update(index, next_bytes(i))
+    }
   }
 
   def incr_num_cells () : Int = {
@@ -110,6 +138,57 @@ case class Node ( node_type : NodeType
     this.value ( cell_num , value )
   }
 
+  def set_node_root ( is_root : Boolean ) : Unit = {
+    val byte_val = if ( is_root ) 1.asInstanceOf[Byte] else 0.asInstanceOf[Byte]
+    this.data.update(NodeHeaderLayout.IS_ROOT_OFFSET, byte_val)
+  }
+
+  def num_keys ( ) : Int = {
+    val from  = InternalNodeHeaderLayout.NUM_KEYS_OFFSET
+    val until = from + InternalNodeHeaderLayout.NUM_KEYS_SIZE
+    val bytes = this.data.slice(from,until).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def num_keys ( keys : Int ) : Int = {
+    val size   = InternalNodeHeaderLayout.NUM_KEYS_SIZE
+    val bytes  = ByteBuffer.allocate(size).putInt(keys).array()
+    val offset = InternalNodeHeaderLayout.NUM_KEYS_OFFSET
+    bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
+  }
+
+  def right_child () : Int = {
+    val from  = InternalNodeHeaderLayout.RIGHT_CHILD_OFFSET
+    val until = from + InternalNodeHeaderLayout.RIGHT_CHILD_SIZE
+    val bytes = this.data.slice(from,until).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def right_child ( value : Int ) : Unit = {
+    val size   = InternalNodeHeaderLayout.RIGHT_CHILD_SIZE
+    val bytes  = ByteBuffer.allocate(size).putInt(value).array()
+    val offset = InternalNodeHeaderLayout.RIGHT_CHILD_OFFSET
+    bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
+  }
+
+  def child ( child_num : Int ) : Int = {
+    val num_keys = this.num_keys()
+    if ( child_num > num_keys ) {
+      throw new RuntimeException(s"Tried to access child_num $child_num > num_keys $num_keys")
+    } else if (child_num == num_keys) {
+      right_child()
+    } else {
+      cell(child_num)
+    }
+  }
+
+  def max_key ( ) : Int = {
+    this.node_type match {
+      case NodeType.INTERNAL => this.key ( this.num_keys  () - 1 )
+      case NodeType.LEAF     => this.key ( this.num_cells () - 1 )
+    }
+  }
+
   override def toString : String = {
     val sb = new StringBuffer()
     sb.append(f"leaf (size ${num_cells()})")
@@ -152,6 +231,35 @@ case class Pager ( file : File ) {
   val file_descriptor : RandomAccessFile = new RandomAccessFile(file, "rw")
 
   var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page]()
+
+  def get_unused_page_num() : Int = pages.length
+
+  def create_new_root ( table : Table , right_child_page_num : Int ) : Unit = {
+    /*
+     * Handle splitting the root.
+     * Old root copied to new page, becomes left child.
+     * Address of right child passed in.
+     * Re-initialize root page to contain the new root node.
+     * New root node points to two children.
+     */
+    val root_node           = table.pager.get_page(table.root_page_num).node
+    val right_child_node    = table.pager.get_page(right_child_page_num).node
+    val left_child_page_num = table.pager.get_unused_page_num()
+    val left_child_node     = table.pager.get_page(left_child_page_num).node
+
+    /* Left child has data copied from old root */
+    val root_bytes = root_node.data.slice(0, Pager.PAGE_BYTES)
+    root_bytes.foldLeft ( 0 ) { (index,byte) => left_child_node.data.update ( index , byte ) ; index + 1 }
+    left_child_node.set_node_root(false)
+
+    /* Root node is a new internal node with one key and two children */
+    root_node.set_node_root(true)
+    root_node.num_keys(1)
+    root_node.child(0)
+    val left_child_max_key = left_child_node.max_key()
+    root_node.key(0, left_child_max_key)
+    root_node.right_child(right_child_page_num)
+  }
 
   def get_page ( page_num : Int ) : Page = {
     if ( this.pages.isEmpty || ( this.pages.length >= page_num && this.pages(page_num) == null ) ) {
@@ -215,8 +323,7 @@ case object Table {
 class Cursor ( val table : Table
              , var page_num : Int
              , var cell_num : Int
-             , var end_of_table : Boolean /* Indicates a position one past the last element */ )
-{
+             , var end_of_table : Boolean /* Indicates a position one past the last element */ ) {
 
   def cursor_value () : ( Page , Int ) = {
     val page = table.pager.get_page(page_num)
@@ -374,14 +481,14 @@ class SQLite {
 
 object SQLite {
 
-  def do_meta_command ( command : String , table : Table ) : Unit = {
-    if ( ".exit".equals(command) ) {
+  def do_meta_command(command: String, table: Table): Unit = {
+    if (".exit".equals(command)) {
       table.db_close()
-      System.exit ( 0 )
-    } else if ( ".btree".equals(command) ) {
+      System.exit(0)
+    } else if (".btree".equals(command)) {
       println("Tree:")
       Node.print_leaf_node(table.pager.get_page(0).node)
-    } else if ( ".constants".equals(command) ) {
+    } else if (".constants".equals(command)) {
       println("Constants:")
       Node.print_constants()
     } else {
@@ -389,35 +496,99 @@ object SQLite {
     }
   }
 
-  val INSERT_MATCHER : scala.util.matching.Regex = "insert (.*) (.*) (.*)".r
-  val SELECT_MATCHER : scala.util.matching.Regex = "select (.*)".r
+  val INSERT_MATCHER: scala.util.matching.Regex = "insert (.*) (.*) (.*)".r
+  val SELECT_MATCHER: scala.util.matching.Regex = "select (.*)".r
 
-  def prepare_statement ( statement : String ) : ( PrepareStatement.Result , Option[Statement] ) = {
-    if ( statement.startsWith("insert") ) {
+  def prepare_statement(statement: String): (PrepareStatement.Result, Option[Statement]) = {
+    if (statement.startsWith("insert")) {
       val row = INSERT_MATCHER.findFirstMatchIn(statement) match {
         case Some(v) =>
-          val id    = Integer.parseInt(v.group(1))
-          val user  = v.group(2)
+          val id = Integer.parseInt(v.group(1))
+          val user = v.group(2)
           val email = v.group(3)
 
-          if ( id < 0 ) { return ( PrepareStatement.NEGATIVE_ID , None ) }
-
-          if ( ( user.length  > UserRow.Column.USER_BYTES ) || ( email.length > UserRow.Column.EMAIL_BYTES ) ) {
-            return ( PrepareStatement.STRING_TOO_LONG , None )
+          if (id < 0) {
+            return (PrepareStatement.NEGATIVE_ID, None)
           }
 
-          UserRow(id,user,email)
-        case _ => return ( PrepareStatement.UNRECOGNIZED_STATEMENT , None )
+          if ((user.length > UserRow.Column.USER_BYTES) || (email.length > UserRow.Column.EMAIL_BYTES)) {
+            return (PrepareStatement.STRING_TOO_LONG, None)
+          }
+
+          UserRow(id, user, email)
+        case _ => return (PrepareStatement.UNRECOGNIZED_STATEMENT, None)
       }
-      ( PrepareStatement.SUCCESS , Some(Statement(StatementType.INSERT, row)) )
-    } else if ( statement.startsWith("select") ) {
+      (PrepareStatement.SUCCESS, Some(Statement(StatementType.INSERT, row)))
+    } else if (statement.startsWith("select")) {
       val row = SELECT_MATCHER.findFirstMatchIn(statement) match {
         case Some(_) => UserRow()
-        case _ => return ( PrepareStatement.UNRECOGNIZED_STATEMENT , None )
+        case _ => return (PrepareStatement.UNRECOGNIZED_STATEMENT, None)
       }
-      ( PrepareStatement.SUCCESS , Some(Statement(StatementType.SELECT , row)) )
+      (PrepareStatement.SUCCESS, Some(Statement(StatementType.SELECT, row)))
     } else {
-      ( PrepareStatement.SYNTAX_ERROR , None )
+      (PrepareStatement.SYNTAX_ERROR, None)
+    }
+  }
+
+  def leaf_node_cell ( node : Node , cell_num : Int ) : Int =
+    node.cell(LeafNodeHeaderLayout.HEADER_BYTES + cell_num * LeafNodeBodyLayout.CELL_BYTES)
+
+  def is_node_root ( node : Node ) : Boolean = node.data(NodeHeaderLayout.IS_ROOT_OFFSET) == 0
+
+  private def leaf_node_split_and_insert ( cursor : Cursor, key : Int, row : UserRow ) : Unit = {
+    /*
+     * Create a new node and move half the cells over.
+     * Insert the new value in one of the two nodes.
+     * Update parent or create a new parent.
+     */
+    val old_node     = cursor.table.pager.get_page(cursor.page_num).node
+    val new_page_num = cursor.table.pager.get_unused_page_num()
+    val new_node     = cursor.table.pager.get_page(new_page_num).node
+
+    /*
+     * All existing keys plus new key should be divided
+     * evenly between old (left) and new (right) nodes.
+     * Starting from the right, move each key to correct position.
+     */
+    for ( i <- LeafNodeBodyLayout.MAX_CELLS until 0 by -1 ) {
+      var destination_node : Node = null
+      if ( i >= LeafNodeBodyLayout.LEFT_SPLIT_COUNT ) {
+        destination_node = new_node
+      } else {
+        destination_node = old_node
+      }
+
+      val index_within_node = i % LeafNodeBodyLayout.LEFT_SPLIT_COUNT
+      val destination = leaf_node_cell(destination_node, index_within_node)
+
+      if ( i == cursor.cell_num ) {
+        val serialized_row = UserRow.serialize(row)
+      } else if ( i > cursor.cell_num ) {
+        val src_cell_from  = leaf_node_cell(old_node, i - 1)
+        val src_cell_until = src_cell_from + LeafNodeBodyLayout.CELL_BYTES
+        val src_bytes      = old_node.data.slice(src_cell_from, src_cell_until)
+
+        src_bytes.foldLeft ( destination ) { (index,byte) => old_node.data.update ( index , byte ) ; index + 1 }
+//        memcpy(destination, leaf_node_cell(old_node, i - 1), LeafNodeBodyLayout.CELL_BYTES)
+      } else {
+        val src_cell_from  = leaf_node_cell(old_node, i)
+        val src_cell_until = src_cell_from + LeafNodeBodyLayout.CELL_BYTES
+        val src_bytes      = old_node.data.slice(src_cell_from, src_cell_until)
+
+        src_bytes.foldLeft ( destination ) { (index,byte) => old_node.data.update ( index , byte ) ; index + 1 }
+//        memcpy(destination, leaf_node_cell(old_node, i), LeafNodeBodyLayout.CELL_BYTES)
+      }
+    }
+
+    /* Update cell count on both leaf nodes */
+    old_node.num_cells( LeafNodeBodyLayout.LEFT_SPLIT_COUNT  )
+    new_node.num_cells( LeafNodeBodyLayout.RIGHT_SPLIT_COUNT )
+
+    if ( is_node_root(old_node) ) {
+      cursor.table.pager.create_new_root(cursor.table, new_page_num)
+    } else {
+      println("Need to implement updating parent after split")
+      System.exit(-1)
     }
   }
 
@@ -426,7 +597,7 @@ object SQLite {
 
     val num_cells = node.num_cells()
     if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
-      println("Need to implement splitting a leaf node.")
+      leaf_node_split_and_insert(cursor, key, row)
     }
 
     if ( cursor.cell_num < num_cells ) {
@@ -449,9 +620,6 @@ object SQLite {
   def execute_insert ( statement : Statement , table : Table ) : ExecuteStatement.Result = {
     val node      = table.pager.get_page(table.root_page_num).node
     val num_cells = node.num_cells()
-    if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
-      return ExecuteStatement.TABLE_FULL
-    }
 
     val row_to_insert = statement.row
     val key_to_insert = row_to_insert.id
