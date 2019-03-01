@@ -302,6 +302,41 @@ case class Pager ( file : File ) {
     file_descriptor.seek(page_num * Pager.PAGE_BYTES)
     file_descriptor.write(pages(page_num).node.data.toArray, 0 , Pager.PAGE_BYTES)
   }
+
+  def print_tree ( page_num : Int , indentation_level : Int ) : Unit = {
+
+    def indent ( level : Int ) : Unit = {
+      for ( _ <- 0 until level ) {
+        printf("  ")
+      }
+    }
+
+    val node = get_page(page_num).node
+
+    node.node_type match {
+      case NodeType.LEAF =>
+        val num_keys = node.num_cells()
+        indent(indentation_level)
+        println(s"- leaf (size $num_keys)")
+        for ( i <- 0 until num_keys ) {
+          indent(indentation_level + 1)
+          println(s"- ${node.key(i)}")
+        }
+      case NodeType.INTERNAL =>
+        val num_keys = node.num_keys()
+        indent(indentation_level)
+        println(s"- internal (size $num_keys)")
+        for ( i <- 0 until num_keys ) {
+          val child = node.child(i)
+          print_tree(child, indentation_level + 1)
+
+          indent(indentation_level + 1)
+          printf(s"- key ${node.key(i)}")
+        }
+        val child = node.right_child()
+        print_tree(child, indentation_level + 1)
+    }
+  }
 }
 
 case object Pager {
@@ -487,7 +522,7 @@ object SQLite {
       System.exit(0)
     } else if (".btree".equals(command)) {
       println("Tree:")
-      Node.print_leaf_node(table.pager.get_page(0).node)
+      table.pager.print_tree(0,0)
     } else if (".constants".equals(command)) {
       println("Constants:")
       Node.print_constants()
