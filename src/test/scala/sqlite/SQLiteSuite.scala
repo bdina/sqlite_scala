@@ -149,15 +149,15 @@ class SQLiteSuite extends FlatSpec with Matchers {
                                        , "insert 2 user2 person2@example.com"
                                        , ".btree")).iterator
 
-    result.next should be ( "db > Executed." )
-    result.next should be ( "db > Executed." )
-    result.next should be ( "db > Executed." )
-    result.next should be ( "db > Tree:"     )
-    result.next should be ( "leaf (size 3)"  )
-    result.next should be ( "  - 0 : 1"      )
-    result.next should be ( "  - 1 : 2"      )
-    result.next should be ( "  - 2 : 3"      )
-    result.next should be ( "db > "          )
+    result.next should be ( "db > Executed."   )
+    result.next should be ( "db > Executed."   )
+    result.next should be ( "db > Executed."   )
+    result.next should be ( "db > Tree:"       )
+    result.next should be ( "- leaf (size 3)"  )
+    result.next should be ( "  - 1"            )
+    result.next should be ( "  - 2"            )
+    result.next should be ( "  - 3"            )
+    result.next should be ( "db > "            )
   }
 
   it should "print constants" in {
