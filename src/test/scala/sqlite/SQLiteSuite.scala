@@ -191,4 +191,36 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "Executed."                            )
     result.next should be ( "db > "                                )
   }
+
+  it should "allow printing out the structure of a 3-leaf-node btree" in {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+
+    val commands = new util.ArrayList[String]()
+    for ( i <- 0 to 14 ) {
+      commands.add(s"insert $i user$i person$i@example.com")
+    }
+
+    val result = run_script(commands).iterator()
+
+    result.next should be ("db > Tree:" )
+    result.next should be ("- internal (size 1)" )
+    result.next should be ("  - leaf (size 7)" )
+    result.next should be ("    - 1" )
+    result.next should be ("    - 2" )
+    result.next should be ("    - 3" )
+    result.next should be ("    - 4" )
+    result.next should be ("    - 5" )
+    result.next should be ("    - 6" )
+    result.next should be ("    - 7" )
+    result.next should be ("- key 7" )
+    result.next should be ("  - leaf (size 7)" )
+    result.next should be ("    - 8" )
+    result.next should be ("    - 9" )
+    result.next should be ("    - 10" )
+    result.next should be ("    - 11" )
+    result.next should be ("    - 12" )
+    result.next should be ("    - 13" )
+    result.next should be ("    - 14" )
+    result.next should be ("db > Need to implement searching an internal node" )
+  }
 }
