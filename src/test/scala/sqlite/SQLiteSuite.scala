@@ -80,6 +80,8 @@ class SQLiteSuite extends FlatSpec with Matchers {
     out
   }
 
+/*
+
   it should "insert and retrieve a row" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
@@ -94,11 +96,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
     val commands = new util.ArrayList[String]()
-    for ( i <- 0 to 14 ) {
+    for ( i <- 0 to 1401 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
     val result = run_script(commands).iterator()
-    for ( _ <- 1 until 14 ) { result.next should be ( "db > Executed." ) }
+    for ( _ <- 1 until 1401 ) { result.next should be ( "db > Executed." ) }
 
     result.next should be ( "db > Table full!" )
   }
@@ -191,7 +193,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "Executed."                            )
     result.next should be ( "db > "                                )
   }
-
+*/
   it should "allow printing out the structure of a 3-leaf-node btree" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
@@ -199,8 +201,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
     for ( i <- 0 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
+    commands.add(".btree")
 
     val result = run_script(commands).iterator()
+
+    for ( _ <- 1 until 14 ) { result.next should be ( "db > Executed." ) }
 
     result.next should be ("db > Tree:" )
     result.next should be ("- internal (size 1)" )

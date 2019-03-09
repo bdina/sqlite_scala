@@ -262,7 +262,7 @@ case class Pager ( file : File ) {
   }
 
   def get_page ( page_num : Int ) : Page = {
-    if ( this.pages.isEmpty || ( this.pages.length >= page_num && this.pages(page_num) == null ) ) {
+    if ( this.pages.isEmpty || ( this.pages.length <= page_num /* && this.pages(page_num) == null */ ) ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
@@ -271,12 +271,14 @@ case class Pager ( file : File ) {
         num_pages += 1
       }
 
-      var page_data = ArrayBuffer[Byte]()
-      if ( page_num <= num_pages ) {
+      val page_data = if ( page_num <= num_pages ) {
         file_descriptor.seek(page_num * Pager.PAGE_BYTES)
         val data = new Array[Byte](Pager.PAGE_BYTES)
         file_descriptor.read(data)
-        page_data = ArrayBuffer[Byte](data:_*)
+        ArrayBuffer[Byte](data:_*)
+      } else {
+        val data = new Array[Byte](Pager.PAGE_BYTES)
+        ArrayBuffer[Byte](data:_*)
       }
 
       if ( this.pages.length <= page_num ) {
@@ -300,7 +302,7 @@ case class Pager ( file : File ) {
     }
 
     file_descriptor.seek(page_num * Pager.PAGE_BYTES)
-    file_descriptor.write(pages(page_num).node.data.toArray, 0 , Pager.PAGE_BYTES)
+    file_descriptor.write(pages(page_num).node.data.toArray, 0, Pager.PAGE_BYTES)
   }
 
   def print_tree ( page_num : Int , indentation_level : Int ) : Unit = {
@@ -633,6 +635,7 @@ object SQLite {
     val num_cells = node.num_cells()
     if ( num_cells >= LeafNodeBodyLayout.MAX_CELLS ) {
       leaf_node_split_and_insert(cursor, key, row)
+      return
     }
 
     if ( cursor.cell_num < num_cells ) {
