@@ -80,8 +80,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
     out
   }
 
-/*
-
   it should "insert and retrieve a row" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
@@ -92,6 +90,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "db > "                                )
   }
 
+  /*
   it should "print error message when table is full" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
@@ -104,6 +103,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
 
     result.next should be ( "db > Table full!" )
   }
+  */
 
   it should "allow inserting strings that are the maximum length" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
@@ -193,19 +193,19 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "Executed."                            )
     result.next should be ( "db > "                                )
   }
-*/
+
   it should "allow printing out the structure of a 3-leaf-node btree" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
     val commands = new util.ArrayList[String]()
-    for ( i <- 0 to 14 ) {
+    for ( i <- 1 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
     commands.add(".btree")
 
     val result = run_script(commands).iterator()
 
-    for ( _ <- 1 until 14 ) { result.next should be ( "db > Executed." ) }
+    for ( _ <- 0 until 14 ) { result.next should be ( "db > Executed." ) }
 
     result.next should be ("db > Tree:" )
     result.next should be ("- internal (size 1)" )
@@ -217,7 +217,7 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ("    - 5" )
     result.next should be ("    - 6" )
     result.next should be ("    - 7" )
-    result.next should be ("- key 7" )
+    result.next should be ("  - key 7" )
     result.next should be ("  - leaf (size 7)" )
     result.next should be ("    - 8" )
     result.next should be ("    - 9" )
@@ -226,6 +226,5 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ("    - 12" )
     result.next should be ("    - 13" )
     result.next should be ("    - 14" )
-    result.next should be ("db > Need to implement searching an internal node" )
   }
 }

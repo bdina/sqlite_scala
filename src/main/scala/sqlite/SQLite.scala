@@ -46,20 +46,20 @@ case object LeafNodeBodyLayout {
 }
 
 case object InternalNodeHeaderLayout {
-  val NUM_KEYS_SIZE      : Int = 4
+  val NUM_KEYS_BYTES     : Int = 4
   val NUM_KEYS_OFFSET    : Int = NodeHeaderLayout.HEADER_BYTES
-  val RIGHT_CHILD_SIZE   : Int = 4
-  val RIGHT_CHILD_OFFSET : Int = NUM_KEYS_OFFSET + NUM_KEYS_SIZE
-  val HEADER_SIZE        : Int = NodeHeaderLayout.HEADER_BYTES + NUM_KEYS_SIZE + RIGHT_CHILD_SIZE
+  val RIGHT_CHILD_BYTES  : Int = 4
+  val RIGHT_CHILD_OFFSET : Int = NUM_KEYS_OFFSET + NUM_KEYS_BYTES
+  val HEADER_BYTES       : Int = NodeHeaderLayout.HEADER_BYTES + NUM_KEYS_BYTES + RIGHT_CHILD_BYTES
 }
 
 case object InternalNodeBodyLayout {
-  val KEY_SIZE   : Int = 4
-  val CHILD_SIZE : Int = 4
-  val CELL_SIZE  : Int = CHILD_SIZE + KEY_SIZE
+  val KEY_BYTES   : Int = 4
+  val CHILD_BYTES : Int = 4
+  val CELL_BYTES  : Int = CHILD_BYTES + KEY_BYTES
 }
 
-case class Node ( node_type : NodeType
+case class Node ( var node_type : NodeType
                 , data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.bytes, 0.asInstanceOf[Byte]) ) {
 
   def num_cells () : Int = {
@@ -96,35 +96,75 @@ case class Node ( node_type : NodeType
     next
   }
 
-  def cell ( cell_num : Int ) : Int = LeafNodeHeaderLayout.HEADER_BYTES + ( cell_num * LeafNodeBodyLayout.CELL_BYTES )
+  def cell ( cell_num : Int ) : Int = {
+    this.node_type match {
+      case NodeType.LEAF     => LeafNodeHeaderLayout.HEADER_BYTES     + ( cell_num * LeafNodeBodyLayout.CELL_BYTES     )
+      case NodeType.INTERNAL => InternalNodeHeaderLayout.HEADER_BYTES + ( cell_num * InternalNodeBodyLayout.CELL_BYTES )
+    }
+  }
 
   def key ( cell_num : Int ) : Int = {
-    val start = cell(cell_num)
-    val end   = start + LeafNodeBodyLayout.KEY_BYTES
+    val start = if ( this.node_type == NodeType.INTERNAL ) {
+      cell ( cell_num ) + InternalNodeBodyLayout.CHILD_BYTES
+    } else {
+      cell ( cell_num )
+    }
+
+    val key_bytes = this.node_type match {
+      case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
+      case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
+    }
+
+    val end   = start + key_bytes
     val bytes = data.slice(start,end).toArray
     ByteBuffer.wrap(bytes).getInt
   }
 
   def key ( cell_num : Int , key : Int ) : Unit = {
-    val key_offset = cell ( cell_num )
+    val key_offset = if ( this.node_type == NodeType.INTERNAL ) {
+      cell ( cell_num ) + InternalNodeBodyLayout.CHILD_BYTES
+    } else {
+      cell ( cell_num )
+    }
 
-    val key_bytes = ByteBuffer.allocate(LeafNodeBodyLayout.KEY_BYTES).putInt(key).array()
+    val key_bytes = this.node_type match {
+      case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
+      case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
+    }
+
+    val key_buffer = ByteBuffer.allocate(key_bytes).putInt(key).array()
     for {
-      ( index , i ) <- ( key_offset until ( key_offset + LeafNodeBodyLayout.KEY_BYTES ) ) zip ( 0 until key_bytes.size )
+      ( index , i ) <- ( key_offset until ( key_offset + key_bytes ) ) zip ( 0 until key_buffer.size )
     } yield {
-      data.update(index, key_bytes(i))
+      data.update(index, key_buffer(i))
     }
   }
 
   def value ( cell_num : Int ) : Array[Byte] = {
-    val start = cell(cell_num) + LeafNodeBodyLayout.KEY_BYTES
-    val end   = start + LeafNodeBodyLayout.VALUE_BYTES
+    val key_bytes = this.node_type match {
+      case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
+      case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
+    }
+
+    val value_bytes = this.node_type match {
+      case NodeType.LEAF     => LeafNodeBodyLayout.VALUE_BYTES
+      case NodeType.INTERNAL => InternalNodeBodyLayout.CELL_BYTES
+    }
+
+    val start = cell(cell_num) + key_bytes
+    val end   = start + value_bytes
     data.slice(start,end).toArray
   }
 
   def value ( cell_num : Int , value : Array[Byte] ) : Unit = {
     val key_offset = cell ( cell_num )
-    val val_offset = key_offset + LeafNodeBodyLayout.KEY_BYTES
+
+    val key_bytes = this.node_type match {
+      case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
+      case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
+    }
+
+    val val_offset = key_offset + key_bytes
 
     for {
       ( index , i ) <- ( val_offset until ( val_offset + value.length ) ) zip value.indices
@@ -145,13 +185,13 @@ case class Node ( node_type : NodeType
 
   def num_keys ( ) : Int = {
     val from  = InternalNodeHeaderLayout.NUM_KEYS_OFFSET
-    val until = from + InternalNodeHeaderLayout.NUM_KEYS_SIZE
+    val until = from + InternalNodeHeaderLayout.NUM_KEYS_BYTES
     val bytes = this.data.slice(from,until).toArray
     ByteBuffer.wrap(bytes).getInt
   }
 
   def num_keys ( keys : Int ) : Int = {
-    val size   = InternalNodeHeaderLayout.NUM_KEYS_SIZE
+    val size   = InternalNodeHeaderLayout.NUM_KEYS_BYTES
     val bytes  = ByteBuffer.allocate(size).putInt(keys).array()
     val offset = InternalNodeHeaderLayout.NUM_KEYS_OFFSET
     bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
@@ -159,27 +199,39 @@ case class Node ( node_type : NodeType
 
   def right_child () : Int = {
     val from  = InternalNodeHeaderLayout.RIGHT_CHILD_OFFSET
-    val until = from + InternalNodeHeaderLayout.RIGHT_CHILD_SIZE
+    val until = from + InternalNodeHeaderLayout.RIGHT_CHILD_BYTES
     val bytes = this.data.slice(from,until).toArray
     ByteBuffer.wrap(bytes).getInt
   }
 
   def right_child ( value : Int ) : Unit = {
-    val size   = InternalNodeHeaderLayout.RIGHT_CHILD_SIZE
+    val size   = InternalNodeHeaderLayout.RIGHT_CHILD_BYTES
     val bytes  = ByteBuffer.allocate(size).putInt(value).array()
     val offset = InternalNodeHeaderLayout.RIGHT_CHILD_OFFSET
     bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
   }
 
+  /** returns the page number for the given child */
   def child ( child_num : Int ) : Int = {
     val num_keys = this.num_keys()
     if ( child_num > num_keys ) {
       throw new RuntimeException(s"Tried to access child_num $child_num > num_keys $num_keys")
-    } else if (child_num == num_keys) {
+    } else if ( child_num == num_keys ) {
       right_child()
     } else {
-      cell(child_num)
+      val from  = cell(child_num)
+      val until = from + InternalNodeBodyLayout.CHILD_BYTES
+      val bytes = this.data.slice(from,until).toArray
+      ByteBuffer.wrap(bytes).getInt
     }
+  }
+
+  /** set the page number for the given child */
+  def child ( child_num : Int , value : Int ) : Int = {
+    val size   = 4
+    val bytes  = ByteBuffer.allocate(size).putInt(value).array()
+    val offset = cell(child_num)
+    bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
   }
 
   def max_key ( ) : Int = {
@@ -191,7 +243,7 @@ case class Node ( node_type : NodeType
 
   override def toString : String = {
     val sb = new StringBuffer()
-    sb.append(f"leaf (size ${num_cells()})")
+    sb.append(f"${this.node_type.toString.toLowerCase} (size ${num_cells()})")
     for ( i <- 0 until num_cells ) {
       sb.append(f" - $i : ${key(i)}")
     }
@@ -243,7 +295,6 @@ case class Pager ( file : File ) {
      * New root node points to two children.
      */
     val root_node           = table.pager.get_page(table.root_page_num).node
-    val right_child_node    = table.pager.get_page(right_child_page_num).node
     val left_child_page_num = table.pager.get_unused_page_num()
     val left_child_node     = table.pager.get_page(left_child_page_num).node
 
@@ -254,8 +305,9 @@ case class Pager ( file : File ) {
 
     /* Root node is a new internal node with one key and two children */
     root_node.set_node_root(true)
+    root_node.node_type = NodeType.INTERNAL
     root_node.num_keys(1)
-    root_node.child(0)
+    root_node.child(0, left_child_page_num)
     val left_child_max_key = left_child_node.max_key()
     root_node.key(0, left_child_max_key)
     root_node.right_child(right_child_page_num)
@@ -333,7 +385,7 @@ case class Pager ( file : File ) {
           print_tree(child, indentation_level + 1)
 
           indent(indentation_level + 1)
-          printf(s"- key ${node.key(i)}")
+          println(s"- key ${node.key(i)}")
         }
         val child = node.right_child()
         print_tree(child, indentation_level + 1)
@@ -567,8 +619,8 @@ object SQLite {
     }
   }
 
-  def leaf_node_cell ( node : Node , cell_num : Int ) : Int =
-    node.cell(LeafNodeHeaderLayout.HEADER_BYTES + cell_num * LeafNodeBodyLayout.CELL_BYTES)
+//  def leaf_node_cell ( node : Node , cell_num : Int ) : Int =
+//    node.cell(LeafNodeHeaderLayout.HEADER_BYTES + cell_num * LeafNodeBodyLayout.CELL_BYTES)
 
   def is_node_root ( node : Node ) : Boolean = node.data(NodeHeaderLayout.IS_ROOT_OFFSET) == 0
 
@@ -588,38 +640,31 @@ object SQLite {
      * Starting from the right, move each key to correct position.
      */
     for ( i <- LeafNodeBodyLayout.MAX_CELLS until 0 by -1 ) {
-      var destination_node : Node = null
-      if ( i >= LeafNodeBodyLayout.LEFT_SPLIT_COUNT ) {
-        destination_node = new_node
-      } else {
-        destination_node = old_node
-      }
+      val destination_node = if ( i >= LeafNodeBodyLayout.LEFT_SPLIT_COUNT ) { new_node } else { old_node }
 
       val index_within_node = i % LeafNodeBodyLayout.LEFT_SPLIT_COUNT
-      val destination = leaf_node_cell(destination_node, index_within_node)
+      val destination       = destination_node.cell(index_within_node)
 
       if ( i == cursor.cell_num ) {
-        val serialized_row = UserRow.serialize(row)
+        new_node.key_and_value( index_within_node , key , UserRow.serialize(row) )
       } else if ( i > cursor.cell_num ) {
-        val src_cell_from  = leaf_node_cell(old_node, i - 1)
+        val src_cell_from  = old_node.cell(i - 1)
         val src_cell_until = src_cell_from + LeafNodeBodyLayout.CELL_BYTES
         val src_bytes      = old_node.data.slice(src_cell_from, src_cell_until)
 
-        src_bytes.foldLeft ( destination ) { (index,byte) => old_node.data.update ( index , byte ) ; index + 1 }
-//        memcpy(destination, leaf_node_cell(old_node, i - 1), LeafNodeBodyLayout.CELL_BYTES)
+        src_bytes.foldLeft ( destination ) { (index,byte) => destination_node.data.update ( index , byte ) ; index + 1 }
       } else {
-        val src_cell_from  = leaf_node_cell(old_node, i)
+        val src_cell_from  = old_node.cell(i)
         val src_cell_until = src_cell_from + LeafNodeBodyLayout.CELL_BYTES
         val src_bytes      = old_node.data.slice(src_cell_from, src_cell_until)
 
-        src_bytes.foldLeft ( destination ) { (index,byte) => old_node.data.update ( index , byte ) ; index + 1 }
-//        memcpy(destination, leaf_node_cell(old_node, i), LeafNodeBodyLayout.CELL_BYTES)
+        src_bytes.foldLeft ( destination ) { (index,byte) => destination_node.data.update ( index , byte ) ; index + 1 }
       }
     }
 
     /* Update cell count on both leaf nodes */
-    old_node.num_cells( LeafNodeBodyLayout.LEFT_SPLIT_COUNT  )
-    new_node.num_cells( LeafNodeBodyLayout.RIGHT_SPLIT_COUNT )
+    old_node.num_cells ( LeafNodeBodyLayout.LEFT_SPLIT_COUNT  )
+    new_node.num_cells ( LeafNodeBodyLayout.RIGHT_SPLIT_COUNT )
 
     if ( is_node_root(old_node) ) {
       cursor.table.pager.create_new_root(cursor.table, new_page_num)
