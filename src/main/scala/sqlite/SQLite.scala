@@ -464,8 +464,7 @@ case class Table () {
     if ( root_node.node_type == NodeType.LEAF ) {
       leaf_node_find(root_page_num, key)
     } else {
-      println("Need to implement searching an internal node")
-      null /* code replaced system.exit -1 */
+      internal_node_find(root_page_num, key)
     }
   }
 
