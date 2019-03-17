@@ -6,12 +6,16 @@ import java.nio.file.{Files, Paths}
 import java.util
 import java.util.concurrent.TimeUnit
 
-import org.scalatest.{FlatSpec, Matchers}
+import org.scalatest.{BeforeAndAfter, FlatSpec, Matchers}
 import org.junit.runner.RunWith
 import org.scalatest.junit.JUnitRunner
 
 @RunWith(classOf[JUnitRunner])
-class SQLiteSuite extends FlatSpec with Matchers {
+class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
+
+  before {
+    Files.deleteIfExists(Paths.get("sqlite.db"))
+  }
 
   def run_script ( commands : util.List[String] ) : util.List[String] = {
     val process = new ProcessBuilder("./db").start()
@@ -81,8 +85,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "insert and retrieve a row" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result.next should be ( "db > Executed." )
     result.next should be ( "db > (1, user1, person1@example.com)" )
@@ -91,8 +93,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print error message when table is full" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val commands = new util.ArrayList[String]()
     for ( i <- 0 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
@@ -100,12 +100,10 @@ class SQLiteSuite extends FlatSpec with Matchers {
     val result = run_script(commands).iterator()
     for ( _ <- 0 until 14 ) { result.next should be ( "db > Executed." ) }
 
-    result.next should be ( "db > Need to implement searching an internal node" )
+    result.next should be ( "db > Executed." )
   }
 
   it should "allow inserting strings that are the maximum length" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val user  = "a"*145
     val email = "a"*145
     val commands = util.List.of(s"insert 1 $user $email" , "select *")
@@ -114,8 +112,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print error message if strings are too long" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val user  = "a"*146
     val email = "a"*146
     val commands = util.Arrays.asList(s"insert 1 $user $email")
@@ -124,15 +120,11 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print error message is id is negative" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val result = run_script(java.util.Arrays.asList("insert -1 user1 person1@example.com")).iterator()
     result.next should be ( "db > ID must be positive." )
   }
 
   it should "keep data after closing connection" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val result1 = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result1.next should be ( "db > Executed." )
     result1.next should be ( "db > (1, user1, person1@example.com)" )
@@ -142,8 +134,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "allow printing out the structure of a one-node btree" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val result = run_script(util.List.of("insert 3 user3 person3@example.com"
                                        , "insert 1 user1 person1@example.com"
                                        , "insert 2 user2 person2@example.com"
@@ -161,8 +151,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "print constants" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val list = new util.ArrayList[String]()
     list.add ( ".constants" )
 
@@ -178,8 +166,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "prints an error message if there is a duplicate id" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val result = run_script(util.List.of(
         "insert 1 user1 person1@example.com"
       , "insert 1 user1 person1@example.com"
@@ -193,8 +179,6 @@ class SQLiteSuite extends FlatSpec with Matchers {
   }
 
   it should "allow printing out the structure of a 3-leaf-node btree" in {
-    Files.deleteIfExists(Paths.get("sqlite.db"))
-
     val commands = new util.ArrayList[String]()
     for ( i <- 1 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
