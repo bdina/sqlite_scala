@@ -495,6 +495,32 @@ case class Table () {
     cursor.cell_num = min_index
     cursor
   }
+
+  def internal_node_find ( page_num : Int , key : Int ) : Cursor = {
+    val node     = pager.get_page(page_num).node
+    val num_keys = node.num_keys()
+
+    /* Binary search to find index of child to search */
+    var min_index = 0
+    var max_index = num_keys /* there is one more child than key */
+
+    while ( min_index != max_index ) {
+      val index = (min_index + max_index) / 2
+      val key_to_right = node.key(index)
+      if ( key_to_right >= key ) {
+        max_index = index
+      } else {
+        min_index = index + 1
+      }
+    }
+
+    val child_num = node.child(min_index)
+    val child     = pager.get_page(child_num).node
+    child.node_type match {
+      case NodeType.LEAF     => leaf_node_find(child_num, key)
+      case NodeType.INTERNAL => internal_node_find(child_num, key)
+    }
+  }
 }
 
 object StatementType {
