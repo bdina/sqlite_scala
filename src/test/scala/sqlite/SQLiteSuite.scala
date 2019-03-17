@@ -37,7 +37,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
 
         os.flush()
 
-        TimeUnit.MILLISECONDS.sleep(1500L)
+        TimeUnit.MILLISECONDS.sleep(3000L)
 
         val cbuf = CharBuffer.allocate(8192)
 
@@ -60,7 +60,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
 
       os.flush()
 
-      TimeUnit.MILLISECONDS.sleep(1500L)
+      TimeUnit.MILLISECONDS.sleep(3000L)
 
       val cbuf = CharBuffer.allocate(8192)
 
