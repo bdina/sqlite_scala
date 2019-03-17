@@ -90,20 +90,18 @@ class SQLiteSuite extends FlatSpec with Matchers {
     result.next should be ( "db > "                                )
   }
 
-  /*
   it should "print error message when table is full" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
 
     val commands = new util.ArrayList[String]()
-    for ( i <- 0 to 1401 ) {
+    for ( i <- 0 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
     val result = run_script(commands).iterator()
-    for ( _ <- 1 until 1401 ) { result.next should be ( "db > Executed." ) }
+    for ( _ <- 0 until 14 ) { result.next should be ( "db > Executed." ) }
 
-    result.next should be ( "db > Table full!" )
+    result.next should be ( "db > Need to implement searching an internal node" )
   }
-  */
 
   it should "allow inserting strings that are the maximum length" in {
     Files.deleteIfExists(Paths.get("sqlite.db"))
