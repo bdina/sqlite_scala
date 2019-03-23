@@ -29,7 +29,9 @@ case object NodeHeaderLayout {
 case object LeafNodeHeaderLayout {
   val NUM_CELLS_BYTES  : Int = 4
   val NUM_CELLS_OFFSET : Int = NodeHeaderLayout.HEADER_BYTES
-  val HEADER_BYTES     : Int = NodeHeaderLayout.HEADER_BYTES + NUM_CELLS_BYTES
+  val NEXT_LEAF_BYTES  : Int = 4
+  val NEXT_LEAF_OFFSET : Int = NUM_CELLS_OFFSET + NUM_CELLS_BYTES
+  val HEADER_BYTES     : Int = NodeHeaderLayout.HEADER_BYTES + NUM_CELLS_BYTES + NEXT_LEAF_BYTES
 }
 
 /* Leaf Node Body Layout */
@@ -241,6 +243,20 @@ case class Node ( var node_type : NodeType
     }
   }
 
+  def leaf_node_next_leaf () : Int = {
+    val from  = LeafNodeHeaderLayout.NEXT_LEAF_OFFSET
+    val until = from + 4
+    val bytes = this.data.slice(from,until).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def leaf_node_next_leaf ( page_num : Int ): Unit = {
+    val size   = 4
+    val bytes  = ByteBuffer.allocate(size).putInt(page_num).array()
+    val offset = LeafNodeHeaderLayout.NEXT_LEAF_OFFSET
+    bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
+  }
+
   override def toString : String = {
     val sb = new StringBuffer()
     sb.append(f"${this.node_type.toString.toLowerCase} (size ${num_cells()})")
@@ -423,7 +439,15 @@ class Cursor ( val table : Table
     val page = table.pager.get_page(page_num)
     this.cell_num += 1
     if ( cell_num >= page.node.num_cells() ) {
-      this.end_of_table = true
+      /* Advance to next leaf node */
+      val next_page_num = page.node.leaf_node_next_leaf()
+      if ( next_page_num == 0 ) {
+        /* This was rightmost leaf */
+        end_of_table = true
+      } else {
+        page_num = next_page_num
+        cell_num = 0
+      }
     }
   }
 }
@@ -443,17 +467,6 @@ case class Table () {
     }
   }
 
-  def table_start () : Cursor = {
-    val page_num = this.root_page_num
-    val cell_num = 0
-
-    val page = pager.get_page(this.root_page_num)
-    val num_cells = page.node.num_cells()
-    val end_of_table = num_cells == 0
-
-    new Cursor ( this , page_num , cell_num  , end_of_table )
-  }
-
   /**
     * Return the position of the given key. If the key is not present, return the position where it should be inserted
     */
@@ -466,6 +479,16 @@ case class Table () {
     } else {
       internal_node_find(root_page_num, key)
     }
+  }
+
+  def table_start () : Cursor = {
+    val cursor = table_find(0)
+
+    val node = pager.get_page(cursor.page_num).node
+    val num_cells = node.num_cells()
+    cursor.end_of_table = num_cells == 0
+
+    cursor
   }
 
   def leaf_node_find ( page_num : Int , key : Int ) : Cursor = {
@@ -658,6 +681,9 @@ object SQLite {
     val old_node     = cursor.table.pager.get_page(cursor.page_num).node
     val new_page_num = cursor.table.pager.get_unused_page_num()
     val new_node     = cursor.table.pager.get_page(new_page_num).node
+
+    new_node.leaf_node_next_leaf(cursor.page_num)
+    old_node.leaf_node_next_leaf(new_page_num)
 
     /*
      * All existing keys plus new key should be divided
