@@ -667,9 +667,6 @@ object SQLite {
     }
   }
 
-//  def leaf_node_cell ( node : Node , cell_num : Int ) : Int =
-//    node.cell(LeafNodeHeaderLayout.HEADER_BYTES + cell_num * LeafNodeBodyLayout.CELL_BYTES)
-
   def is_node_root ( node : Node ) : Boolean = node.data(NodeHeaderLayout.IS_ROOT_OFFSET) == 0
 
   private def leaf_node_split_and_insert ( cursor : Cursor, key : Int, row : UserRow ) : Unit = {
