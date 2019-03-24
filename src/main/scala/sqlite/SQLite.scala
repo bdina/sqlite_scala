@@ -61,8 +61,32 @@ case object InternalNodeBodyLayout {
   val CELL_BYTES  : Int = CHILD_BYTES + KEY_BYTES
 }
 
-case class Node ( var node_type : NodeType
-                , data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.bytes, 0.asInstanceOf[Byte]) ) {
+case class Node ( data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.bytes, 0.asInstanceOf[Byte]) ) {
+
+  def node_type ( node_type : NodeType ) : Unit = {
+    val start = NodeHeaderLayout.NODE_TYPE_OFFSET
+    val end   = start + NodeHeaderLayout.NODE_TYPE_BYTES
+
+    val node_type_byte : Byte = node_type match {
+      case NodeType.LEAF => 0
+      case NodeType.INTERNAL => 1
+    }
+
+    val bytes = ByteBuffer.allocate(NodeHeaderLayout.NODE_TYPE_BYTES).put(node_type_byte).array()
+
+    for {
+      ( index , i ) <- ( start until end ) zip bytes.indices
+    } yield {
+      data.update(index, bytes(i))
+    }
+  }
+
+  def node_type () : NodeType = {
+    val start = NodeHeaderLayout.NODE_TYPE_OFFSET
+    val end   = start + NodeHeaderLayout.NODE_TYPE_BYTES
+    val node_type = data.slice(start,end)(0)
+    if ( node_type == 0 ) NodeType.LEAF else NodeType.INTERNAL
+  }
 
   def num_cells () : Int = {
     val start = LeafNodeHeaderLayout.NUM_CELLS_OFFSET
@@ -99,20 +123,20 @@ case class Node ( var node_type : NodeType
   }
 
   def cell ( cell_num : Int ) : Int = {
-    this.node_type match {
+    this.node_type() match {
       case NodeType.LEAF     => LeafNodeHeaderLayout.HEADER_BYTES     + ( cell_num * LeafNodeBodyLayout.CELL_BYTES     )
       case NodeType.INTERNAL => InternalNodeHeaderLayout.HEADER_BYTES + ( cell_num * InternalNodeBodyLayout.CELL_BYTES )
     }
   }
 
   def key ( cell_num : Int ) : Int = {
-    val start = if ( this.node_type == NodeType.INTERNAL ) {
+    val start = if ( this.node_type() == NodeType.INTERNAL ) {
       cell ( cell_num ) + InternalNodeBodyLayout.CHILD_BYTES
     } else {
       cell ( cell_num )
     }
 
-    val key_bytes = this.node_type match {
+    val key_bytes = this.node_type() match {
       case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
       case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
     }
@@ -123,13 +147,13 @@ case class Node ( var node_type : NodeType
   }
 
   def key ( cell_num : Int , key : Int ) : Unit = {
-    val key_offset = if ( this.node_type == NodeType.INTERNAL ) {
+    val key_offset = if ( this.node_type() == NodeType.INTERNAL ) {
       cell ( cell_num ) + InternalNodeBodyLayout.CHILD_BYTES
     } else {
       cell ( cell_num )
     }
 
-    val key_bytes = this.node_type match {
+    val key_bytes = this.node_type() match {
       case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
       case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
     }
@@ -143,12 +167,12 @@ case class Node ( var node_type : NodeType
   }
 
   def value ( cell_num : Int ) : Array[Byte] = {
-    val key_bytes = this.node_type match {
+    val key_bytes = this.node_type() match {
       case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
       case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
     }
 
-    val value_bytes = this.node_type match {
+    val value_bytes = this.node_type() match {
       case NodeType.LEAF     => LeafNodeBodyLayout.VALUE_BYTES
       case NodeType.INTERNAL => InternalNodeBodyLayout.CELL_BYTES
     }
@@ -161,7 +185,7 @@ case class Node ( var node_type : NodeType
   def value ( cell_num : Int , value : Array[Byte] ) : Unit = {
     val key_offset = cell ( cell_num )
 
-    val key_bytes = this.node_type match {
+    val key_bytes = this.node_type() match {
       case NodeType.LEAF     => LeafNodeBodyLayout.KEY_BYTES
       case NodeType.INTERNAL => InternalNodeBodyLayout.KEY_BYTES
     }
@@ -237,7 +261,7 @@ case class Node ( var node_type : NodeType
   }
 
   def max_key ( ) : Int = {
-    this.node_type match {
+    this.node_type() match {
       case NodeType.INTERNAL => this.key ( this.num_keys  () - 1 )
       case NodeType.LEAF     => this.key ( this.num_cells () - 1 )
     }
@@ -259,7 +283,7 @@ case class Node ( var node_type : NodeType
 
   override def toString : String = {
     val sb = new StringBuffer()
-    sb.append(f"${this.node_type.toString.toLowerCase} (size ${num_cells()})")
+    sb.append(f"${this.node_type().toString.toLowerCase} (size ${num_cells()})")
     for ( i <- 0 until num_cells ) {
       sb.append(f" - $i : ${key(i)}")
     }
@@ -271,7 +295,7 @@ case object Node {
 
   val bytes : Int = LeafNodeHeaderLayout.HEADER_BYTES + LeafNodeBodyLayout.SPACE_FOR_CELLS
 
-  def initialize_leaf_node () : Node = Node ( NodeType.LEAF )
+  def initialize_leaf_node () : Node = Node ()
 
   def print_constants () : Unit = {
     println(f"ROW_BYTES: ${UserRow.Column.ROW_BYTES}")
@@ -321,7 +345,7 @@ case class Pager ( file : File ) {
 
     /* Root node is a new internal node with one key and two children */
     root_node.set_node_root(true)
-    root_node.node_type = NodeType.INTERNAL
+    root_node.node_type(NodeType.INTERNAL)
     root_node.num_keys(1)
     root_node.child(0, left_child_page_num)
     val left_child_max_key = left_child_node.max_key()
@@ -349,11 +373,11 @@ case class Pager ( file : File ) {
         ArrayBuffer[Byte](data:_*)
       }
 
-      if ( this.pages.length <= page_num ) {
-        this.pages += Page ( Node ( NodeType.LEAF , page_data ) )
-      } else {
-        this.pages(page_num) = Page ( Node ( NodeType.LEAF , page_data ) )
-      }
+//      if ( this.pages.length <= page_num ) {
+//        this.pages += Page ( Node ( page_data ) )
+//      } else {
+        this.pages(page_num) = Page ( Node ( page_data ) )
+//      }
 
       if ( page_num >= num_pages ) {
         num_pages = page_num + 1
@@ -383,7 +407,7 @@ case class Pager ( file : File ) {
 
     val node = get_page(page_num).node
 
-    node.node_type match {
+    node.node_type() match {
       case NodeType.LEAF =>
         val num_keys = node.num_cells()
         indent(indentation_level)
@@ -474,7 +498,7 @@ case class Table () {
     val root_page_num = this.root_page_num
     val root_node = pager.get_page(root_page_num).node
 
-    if ( root_node.node_type == NodeType.LEAF ) {
+    if ( root_node.node_type() == NodeType.LEAF ) {
       leaf_node_find(root_page_num, key)
     } else {
       internal_node_find(root_page_num, key)
@@ -538,7 +562,7 @@ case class Table () {
 
     val child_num = node.child(min_index)
     val child     = pager.get_page(child_num).node
-    child.node_type match {
+    child.node_type() match {
       case NodeType.LEAF     => leaf_node_find(child_num, key)
       case NodeType.INTERNAL => internal_node_find(child_num, key)
     }
