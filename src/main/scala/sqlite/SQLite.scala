@@ -322,9 +322,13 @@ case class Pager ( file : File ) {
 
   val file_descriptor : RandomAccessFile = new RandomAccessFile(file, "rw")
 
-  var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page]()
+  var pages : ArrayBuffer[sqlite.Page] = ArrayBuffer[sqlite.Page]().padTo(4096,null)
 
-  def get_unused_page_num() : Int = pages.length
+  def get_unused_page_num() : Int = {
+    var index = 0
+    while ( pages(index) != null ) { index += 1 }
+    index
+  }
 
   def create_new_root ( table : Table , right_child_page_num : Int ) : Unit = {
     /*
@@ -354,7 +358,8 @@ case class Pager ( file : File ) {
   }
 
   def get_page ( page_num : Int ) : Page = {
-    if ( this.pages.isEmpty || ( this.pages.length <= page_num /* && this.pages(page_num) == null */ ) ) {
+    if ( this.pages(page_num) == null ) {
+//    if ( this.pages.isEmpty || ( this.pages.length <= page_num && this.pages(page_num) == null ) ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
