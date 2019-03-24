@@ -17,7 +17,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     Files.deleteIfExists(Paths.get("sqlite.db"))
   }
 
-  def run_script ( commands : util.List[String] ) : util.List[String] = {
+  def run_script ( commands : util.List[String] , delay : Long = 3000l ) : util.List[String] = {
     val process = new ProcessBuilder("./db").start()
 
     val os     = process.getOutputStream
@@ -37,7 +37,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
 
         os.flush()
 
-        TimeUnit.MILLISECONDS.sleep(3000L)
+        TimeUnit.MILLISECONDS.sleep(delay)
 
         val cbuf = CharBuffer.allocate(8192)
 
@@ -60,7 +60,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
 
       os.flush()
 
-      TimeUnit.MILLISECONDS.sleep(3000L)
+      TimeUnit.MILLISECONDS.sleep(delay)
 
       val cbuf = CharBuffer.allocate(8192)
 
@@ -158,7 +158,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     result.next should be ( "db > Constants:"                 )
     result.next should be ( "ROW_BYTES: 294"                  )
     result.next should be ( "COMMON_NODE_HEADER_BYTES: 6"     )
-    result.next should be ( "LEAF_NODE_HEADER_BYTES: 10"      )
+    result.next should be ( "LEAF_NODE_HEADER_BYTES: 14"      )
     result.next should be ( "LEAF_NODE_CELL_BYTES: 298"       )
     result.next should be ( "LEAF_NODE_SPACE_FOR_CELLS: 4090" )
     result.next should be ( "LEAF_NODE_MAX_CELLS: 13"         )
@@ -215,9 +215,10 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     for ( i <- 1 to 15 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
-    commands.add("select *")
 
-    val result = run_script(commands).iterator()
+    run_script(commands,3000l)
+
+    val result = run_script(util.Arrays.asList("select *")).iterator()
 
     result.next should be ( "db > (1, user1, person1@example.com)" )
     result.next should be ( "(2, user2, person2@example.com)" )
