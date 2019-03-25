@@ -59,6 +59,7 @@ case object InternalNodeBodyLayout {
   val KEY_BYTES   : Int = 4
   val CHILD_BYTES : Int = 4
   val CELL_BYTES  : Int = CHILD_BYTES + KEY_BYTES
+  val MAX_CELLS   : Int = 3
 }
 
 case class Node ( data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.bytes, 0.asInstanceOf[Byte]) ) {
@@ -223,6 +224,20 @@ case class Node ( data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.byte
     bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
   }
 
+  def node_parent () : Int = {
+    val from = NodeHeaderLayout.PARENT_POINTER_OFFSET
+    val until = from + NodeHeaderLayout.PARENT_POINTER_BYTES
+    val bytes = this.data.slice(from, until).toArray
+    ByteBuffer.wrap(bytes).getInt
+  }
+
+  def node_parent ( value : Int ) : Unit = {
+    val size   = NodeHeaderLayout.PARENT_POINTER_BYTES
+    val bytes  = ByteBuffer.allocate(size).putInt(value).array()
+    val offset = NodeHeaderLayout.PARENT_POINTER_OFFSET
+    bytes.foldLeft ( offset ) { ( index , byte ) => this.data.update ( index , byte ) ; index + 1 }
+  }
+
   def right_child () : Int = {
     val from  = InternalNodeHeaderLayout.RIGHT_CHILD_OFFSET
     val until = from + InternalNodeHeaderLayout.RIGHT_CHILD_BYTES
@@ -265,6 +280,11 @@ case class Node ( data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.byte
       case NodeType.INTERNAL => this.key ( this.num_keys  () - 1 )
       case NodeType.LEAF     => this.key ( this.num_cells () - 1 )
     }
+  }
+
+  def update_internal_node_key ( old_key : Int , new_key : Int ) : Unit = {
+    val old_child_index = child(old_key)
+    key(old_child_index,new_key)
   }
 
   def leaf_node_next_leaf () : Int = {
@@ -339,6 +359,7 @@ case class Pager ( file : File ) {
      * New root node points to two children.
      */
     val root_node           = table.pager.get_page(table.root_page_num).node
+    val right_child_node    = table.pager.get_page(right_child_page_num).node
     val left_child_page_num = table.pager.get_unused_page_num()
     val left_child_node     = table.pager.get_page(left_child_page_num).node
 
@@ -355,6 +376,9 @@ case class Pager ( file : File ) {
     val left_child_max_key = left_child_node.max_key()
     root_node.key(0, left_child_max_key)
     root_node.right_child(right_child_page_num)
+
+    left_child_node.node_parent(table.root_page_num)
+    right_child_node.node_parent(table.root_page_num)
   }
 
   def get_page ( page_num : Int ) : Page = {
@@ -547,16 +571,19 @@ case class Table () {
     cursor
   }
 
-  def internal_node_find ( page_num : Int , key : Int ) : Cursor = {
-    val node     = pager.get_page(page_num).node
+  def internal_node_find_child ( node : Node , key : Int ) : Int = {
+    /*
+    Return the index of the child which should contain
+    the given key.
+    */
     val num_keys = node.num_keys()
 
-    /* Binary search to find index of child to search */
+    /* Binary search */
     var min_index = 0
     var max_index = num_keys /* there is one more child than key */
 
     while ( min_index != max_index ) {
-      val index = (min_index + max_index) / 2
+      val index = ( min_index + max_index ) / 2
       val key_to_right = node.key(index)
       if ( key_to_right >= key ) {
         max_index = index
@@ -565,11 +592,54 @@ case class Table () {
       }
     }
 
-    val child_num = node.child(min_index)
-    val child     = pager.get_page(child_num).node
+    min_index
+  }
+
+  def internal_node_find ( page_num : Int , key : Int ) : Cursor = {
+    val node     = pager.get_page(page_num).node
+
+    val child_index = internal_node_find_child(node, key)
+    val child_num   = node.child(child_index)
+    val child       = pager.get_page(child_num).node
     child.node_type() match {
       case NodeType.LEAF     => leaf_node_find(child_num, key)
       case NodeType.INTERNAL => internal_node_find(child_num, key)
+    }
+  }
+
+  def internal_node_insert ( parent_page_num : Int , child_page_num  : Int ) : Unit = {
+    /* Add a new child/key pair to parent that corresponds to child */
+
+    val parent        = pager.get_page(parent_page_num).node
+    val child         = pager.get_page(child_page_num).node
+    val child_max_key = child.max_key()
+    val index         = internal_node_find_child(parent, child_max_key)
+
+    val original_num_keys = parent.num_keys()
+
+    if ( original_num_keys >= InternalNodeBodyLayout.MAX_CELLS ) {
+      println("Need to implement splitting internal node")
+      System.exit(-1)
+    }
+    val right_child_page_num = parent.right_child()
+    val right_child = pager.get_page(right_child_page_num).node
+
+    if ( child_max_key > right_child.max_key() ) {
+      /* Replace right child */
+      parent.child(original_num_keys,right_child_page_num)
+      parent.key(original_num_keys, right_child.max_key())
+      parent.right_child(child_page_num)
+    } else {
+      /* Make room for the new cell */
+      for ( i <- original_num_keys until index by -1 ) {
+        val dest = parent.cell(i)
+        val src  = parent.cell(i - 1)
+        val src_bytes = parent.data.slice(src, src + InternalNodeBodyLayout.CELL_BYTES)
+
+        src_bytes.foldLeft ( dest ) { (index,byte) => parent.data.update ( index , byte ) ; index + 1 }
+      }
+      parent.child(index, child_page_num)
+      parent.key(index, child_max_key)
     }
   }
 }
@@ -705,6 +775,7 @@ object SQLite {
      * Update parent or create a new parent.
      */
     val old_node     = cursor.table.pager.get_page(cursor.page_num).node
+    val old_max      = old_node.max_key()
     val new_page_num = cursor.table.pager.get_unused_page_num()
     val new_node     = cursor.table.pager.get_page(new_page_num).node
 
@@ -746,8 +817,12 @@ object SQLite {
     if ( is_node_root(old_node) ) {
       cursor.table.pager.create_new_root(cursor.table, new_page_num)
     } else {
-      println("Need to implement updating parent after split")
-      System.exit(-1)
+      val parent_page_num = old_node.node_parent()
+      val new_max         = old_node.max_key()
+      val parent_node     = cursor.table.pager.get_page(parent_page_num).node
+
+      parent_node.update_internal_node_key(old_max, new_max)
+      cursor.table.internal_node_insert(parent_page_num, new_page_num)
     }
   }
 
