@@ -779,7 +779,8 @@ object SQLite {
     val new_page_num = cursor.table.pager.get_unused_page_num()
     val new_node     = cursor.table.pager.get_page(new_page_num).node
 
-    new_node.leaf_node_next_leaf(cursor.page_num)
+    new_node.node_parent(old_node.node_parent())
+    new_node.leaf_node_next_leaf(old_node.leaf_node_next_leaf())
     old_node.leaf_node_next_leaf(new_page_num)
 
     /*
@@ -787,14 +788,14 @@ object SQLite {
      * evenly between old (left) and new (right) nodes.
      * Starting from the right, move each key to correct position.
      */
-    for ( i <- LeafNodeBodyLayout.MAX_CELLS until 0 by -1 ) {
+    for ( i <- LeafNodeBodyLayout.MAX_CELLS to 0 by -1 ) {
       val destination_node = if ( i >= LeafNodeBodyLayout.LEFT_SPLIT_COUNT ) { new_node } else { old_node }
 
       val index_within_node = i % LeafNodeBodyLayout.LEFT_SPLIT_COUNT
       val destination       = destination_node.cell(index_within_node)
 
       if ( i == cursor.cell_num ) {
-        new_node.key_and_value( index_within_node , key , UserRow.serialize(row) )
+        destination_node.key_and_value( index_within_node , key , UserRow.serialize(row) )
       } else if ( i > cursor.cell_num ) {
         val src_cell_from  = old_node.cell(i - 1)
         val src_cell_until = src_cell_from + LeafNodeBodyLayout.CELL_BYTES
