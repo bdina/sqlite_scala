@@ -255,8 +255,6 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
       , "insert 22 user22 person22@example.com"
       , "insert 19 user19 person19@example.com"
       , "insert 2 user2 person2@example.com"
-    )
-    /*
       , "insert 1 user1 person1@example.com"
       , "insert 21 user21 person21@example.com"
       , "insert 11 user11 person11@example.com"
@@ -275,9 +273,9 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
       , "insert 25 user25 person25@example.com"
       , "insert 28 user28 person28@example.com"
     )
-*/
+
     run_script(commands,1000l)
-/*
+
     val result = run_script(util.Arrays.asList(".btree")).iterator
 
     result.next should be ( "db > Tree:" )
@@ -320,6 +318,5 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     result.next should be ( "    - 29" )
     result.next should be ( "    - 30" )
     result.next should be ( "db > " )
-    */
   }
 }

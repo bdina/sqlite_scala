@@ -282,8 +282,8 @@ case class Node ( data : ArrayBuffer[Byte] = ArrayBuffer[Byte]().padTo(Node.byte
     }
   }
 
-  def update_internal_node_key ( old_key : Int , new_key : Int ) : Unit = {
-    val old_child_index = child(old_key)
+  def update_internal_node_key ( table : Table , old_key : Int , new_key : Int ) : Unit = {
+    val old_child_index = table.internal_node_find_child(this, old_key)
     key(old_child_index,new_key)
   }
 
@@ -511,6 +511,11 @@ case class Table () {
 
   var root_page_num : Int = 0
 
+  {
+    val root_node = pager.get_page(0).node
+    root_node.set_node_root(true)
+  }
+
   def db_close () : Unit = {
     for ( i <- pager.pages.indices ) {
       if ( pager.pages(i) != null ) {
@@ -545,8 +550,8 @@ case class Table () {
   }
 
   def leaf_node_find ( page_num : Int , key : Int ) : Cursor = {
-    val page = pager.get_page ( page_num )
-    val num_cells = page.node.num_cells()
+    val node = pager.get_page ( page_num ).node
+    val num_cells = node.num_cells()
 
     val cursor = new Cursor ( this , page_num , num_cells , false )
 
@@ -555,7 +560,7 @@ case class Table () {
     var one_past_max_index = num_cells
     while ( one_past_max_index != min_index ) {
       val index = ( min_index + one_past_max_index ) / 2
-      val key_at_index = page.node.key(index)
+      val key_at_index = node.key(index)
       if ( key == key_at_index ) {
         cursor.cell_num = index
         return cursor
@@ -609,13 +614,13 @@ case class Table () {
 
   def internal_node_insert ( parent_page_num : Int , child_page_num  : Int ) : Unit = {
     /* Add a new child/key pair to parent that corresponds to child */
-
     val parent        = pager.get_page(parent_page_num).node
     val child         = pager.get_page(child_page_num).node
     val child_max_key = child.max_key()
     val index         = internal_node_find_child(parent, child_max_key)
 
     val original_num_keys = parent.num_keys()
+    parent.num_keys(original_num_keys + 1)
 
     if ( original_num_keys >= InternalNodeBodyLayout.MAX_CELLS ) {
       println("Need to implement splitting internal node")
@@ -766,7 +771,7 @@ object SQLite {
     }
   }
 
-  def is_node_root ( node : Node ) : Boolean = node.data(NodeHeaderLayout.IS_ROOT_OFFSET) == 0
+  def is_node_root ( node : Node ) : Boolean = node.data(NodeHeaderLayout.IS_ROOT_OFFSET) == 1
 
   private def leaf_node_split_and_insert ( cursor : Cursor, key : Int, row : UserRow ) : Unit = {
     /*
@@ -822,7 +827,7 @@ object SQLite {
       val new_max         = old_node.max_key()
       val parent_node     = cursor.table.pager.get_page(parent_page_num).node
 
-      parent_node.update_internal_node_key(old_max, new_max)
+      parent_node.update_internal_node_key(cursor.table, old_max, new_max)
       cursor.table.internal_node_insert(parent_page_num, new_page_num)
     }
   }
