@@ -83,7 +83,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
 
     out
   }
-/*
+
   it should "insert and retrieve a row" in {
     val result = run_script(util.List.of("insert 1 user1 person1@example.com" , "select *")).iterator()
     result.next should be ( "db > Executed." )
@@ -134,14 +134,12 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
   }
 
   it should "allow printing out the structure of a one-node btree" in {
-    val result = run_script(util.List.of("insert 3 user3 person3@example.com"
-                                       , "insert 1 user1 person1@example.com"
-                                       , "insert 2 user2 person2@example.com"
-                                       , ".btree")).iterator
+    run_script(util.List.of("insert 3 user3 person3@example.com"
+                           , "insert 1 user1 person1@example.com"
+                           , "insert 2 user2 person2@example.com"), 1000l)
 
-    result.next should be ( "db > Executed."   )
-    result.next should be ( "db > Executed."   )
-    result.next should be ( "db > Executed."   )
+    val result = run_script(util.Arrays.asList(".btree")).iterator()
+
     result.next should be ( "db > Tree:"       )
     result.next should be ( "- leaf (size 3)"  )
     result.next should be ( "  - 1"            )
@@ -166,10 +164,9 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
   }
 
   it should "prints an error message if there is a duplicate id" in {
-    val result = run_script(util.List.of(
-        "insert 1 user1 person1@example.com"
-      , "insert 1 user1 person1@example.com"
-      , "select *")).iterator
+    val result = run_script(util.List.of("insert 1 user1 person1@example.com"
+                                       , "insert 1 user1 person1@example.com"
+                                       , "select *")).iterator()
 
     result.next should be ( "db > Executed."                       )
     result.next should be ( "db > Error: Duplicate key."           )
@@ -183,11 +180,10 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     for ( i <- 1 to 14 ) {
       commands.add(s"insert $i user$i person$i@example.com")
     }
-    commands.add(".btree")
 
-    val result = run_script(commands).iterator()
+    run_script(commands, 1000l)
 
-    for ( _ <- 0 until 14 ) { result.next should be ( "db > Executed." ) }
+    val result = run_script(util.Arrays.asList(".btree")).iterator()
 
     result.next should be ( "db > Tree:" )
     result.next should be ( "- internal (size 1)" )
@@ -216,7 +212,7 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
       commands.add(s"insert $i user$i person$i@example.com")
     }
 
-    run_script(commands,3000l)
+    run_script(commands,1000l)
 
     val result = run_script(util.Arrays.asList("select *")).iterator()
 
@@ -237,7 +233,6 @@ class SQLiteSuite extends FlatSpec with Matchers with BeforeAndAfter {
     result.next should be ( "(15, user15, person15@example.com)" )
     result.next should be ( "Executed." )
   }
-*/
 
   it should "allow printing out the structure of a 4-leaf-node btree" in {
 
