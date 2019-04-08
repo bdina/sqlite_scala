@@ -383,7 +383,6 @@ case class Pager ( file : File ) {
 
   def get_page ( page_num : Int ) : Page = {
     if ( this.pages(page_num) == null ) {
-//    if ( this.pages.isEmpty || ( this.pages.length <= page_num && this.pages(page_num) == null ) ) {
       // Cache miss. Allocate memory and load from file.
       var num_pages = file_descriptor.length() / Pager.PAGE_BYTES
 
@@ -402,11 +401,7 @@ case class Pager ( file : File ) {
         ArrayBuffer[Byte](data:_*)
       }
 
-//      if ( this.pages.length <= page_num ) {
-//        this.pages += Page ( Node ( page_data ) )
-//      } else {
-        this.pages(page_num) = Page ( Node ( page_data ) )
-//      }
+      this.pages(page_num) = Page ( Node ( page_data ) )
 
       if ( page_num >= num_pages ) {
         num_pages = page_num + 1
